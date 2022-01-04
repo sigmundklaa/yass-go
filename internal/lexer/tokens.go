@@ -26,13 +26,13 @@ const (
 )
 
 type Token struct {
-	kind            TokenKind
-	lexeme          []rune
-	rpos, line, col int
+	kind      TokenKind
+	lexeme    []rune
+	line, col uint32
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf("<Token: {%d, %#v, %d, %d, %d}>", t.kind, string(t.lexeme), t.rpos, t.line, t.col)
+	return fmt.Sprintf("<Token: {%d, %#v, line %d, column %d}>", t.kind, string(t.lexeme), t.line, t.col)
 }
 
 type patternEntry struct {
@@ -80,6 +80,7 @@ func Kind(k string) TokenKind {
 	entry, ok := patterns[k]
 
 	if !ok {
+		// TODO: Maybe panic?
 		return Invalid
 	}
 
