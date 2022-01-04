@@ -65,13 +65,14 @@ type patternEntry struct {
 // (can be avoided by placing ?: at begging capturing group, example: /(?:[0-9]+)/)
 var patterns = []patternEntry{
 	{CommentSL, `//[^\n]*\n`},
-	{CommentML, `/\*(?:[^\*]|\*[^/])*\*/`},
+	{CommentML, `/\*(?:[^\*]|\*[^/])*(?:\*/|$)`},
 	{Boolean, "true|false"},
 	{Assign, "="},
 	{AugAssign, `\+=|-=|\*=|\*\*=|%=`},
 	{ArithOp, `\+|-|\*|/|\*\*|%`},
 	{LogicOp, `!|&&|\|\|`},
 	{ComparisonOp, "==|!=|<|>|<=|>="},
+	{String, `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`},
 	{Hexadecimal, "0x[0-9a-fA-F]+"},
 	{Decimal, `\.[0-9]+|\b(?:[0-9]+(?:(?:\.[0-9]+)?[eE][-+]?[0-9]+)?)\b`},
 	{Identifier, "[a-zA-Z_]\\w*"},
@@ -86,7 +87,7 @@ func CompilePattern() *regexp.Regexp {
 	}
 
 	var builder strings.Builder
-	builder.WriteRune('^')
+	builder.WriteString("^(?:")
 	addOr := false
 
 	for _, entry := range patterns {
@@ -97,6 +98,7 @@ func CompilePattern() *regexp.Regexp {
 		}
 		fmt.Fprintf(&builder, "(%s)", entry.pattern)
 	}
+	builder.WriteRune(')')
 
 	return regexp.MustCompile(builder.String())
 }

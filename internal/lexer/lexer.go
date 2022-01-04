@@ -50,9 +50,9 @@ func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer 
 	return l
 }
 
-func (l *Lexer) Stream(bufSize int) chan *Token {
+func (l *Lexer) Stream(bufSize int) (chan *Token, chan error) {
 	if l.channel != nil {
-		panic(fmt.Errorf("attempted to initialize stream, already initialized"))
+		panic(l.errf("attempted to initialize stream, already initialized"))
 	}
 
 	if bufSize < 0 {
@@ -60,25 +60,27 @@ func (l *Lexer) Stream(bufSize int) chan *Token {
 	}
 
 	l.channel = make(chan *Token, bufSize)
+	errchan := make(chan error)
 
 	go func() {
 		for {
 			tok, err := l.nextToken()
 
 			if err != nil {
-				if err == io.EOF {
-					close(l.channel)
-					return
-				} else {
-					panic(err)
+				if err != io.EOF {
+					errchan <- err
 				}
+
+				close(l.channel)
+				close(errchan)
+				return
 			}
 
 			l.channel <- tok
 		}
 	}()
 
-	return l.channel
+	return l.channel, errchan
 }
 
 func (l *Lexer) fillBuf(length uint) error {
@@ -87,7 +89,7 @@ func (l *Lexer) fillBuf(length uint) error {
 	}
 
 	if max := l.bufSize - uint(len(l.buf)); length > max {
-		return fmt.Errorf("can not add %d elements to buffer, maximum: %d", length, max)
+		return l.errf("can not add %d elements to buffer, maximum: %d", length, max)
 	}
 
 	for i := uint(0); i < length; i++ {
@@ -110,13 +112,13 @@ func (l *Lexer) fillBuf(length uint) error {
 
 func (l *Lexer) shiftBuf(length uint) error {
 	if length <= 0 {
-		panic(fmt.Errorf("attempted to shift negative value: %d", length))
+		panic(l.errf("attempted to shift negative value: %d", length))
 	}
 
 	l.buf = l.buf[length:]
 
 	if length > l.bufpos {
-		panic(fmt.Errorf("attempted shift with length %d, can only max shift %d", length, l.bufpos))
+		panic(l.errf("attempted shift with length %d, can only max shift %d", length, l.bufpos))
 	}
 	l.bufpos -= length
 
@@ -162,10 +164,10 @@ func (l *Lexer) nextLexeme() ([]rune, int, error) {
 			}
 		}
 
-		panic(fmt.Errorf("unnamed submatch found at: %s", matches[0]))
+		panic(l.errf("unnamed submatch found at: %s", matches[0]))
 	}
 
-	return nil, -1, fmt.Errorf("unexpected character: %v", sub)
+	return nil, -1, l.errf("unable to process character at: %#v", string(sub))
 }
 
 func (l *Lexer) advanceWith(tok *Token) {
@@ -181,6 +183,10 @@ func (l *Lexer) advanceWith(tok *Token) {
 	}
 
 	l.bufpos += uint(length)
+}
+
+func (l *Lexer) errf(fmtstr string, args ...interface{}) error {
+	return fmt.Errorf("Lexer error at line %d, column %d: %s", l.line, l.col, fmt.Sprintf(fmtstr, args...))
 }
 
 func (l *Lexer) createToken(kind TokenKind, lexeme []rune) (*Token, error) {
