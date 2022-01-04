@@ -25,6 +25,23 @@ const (
 	AugAssign
 )
 
+var names = map[TokenKind]string{
+	Invalid:      "Invalid",
+	CommentSL:    "CommentSL",
+	CommentML:    "CommentML",
+	Whitespace:   "Whitespace",
+	String:       "String",
+	Hexadecimal:  "Hexadecimal",
+	Decimal:      "Decimal",
+	Boolean:      "Boolean",
+	Identifier:   "Identifier",
+	ArithOp:      "ArithOp",
+	LogicOp:      "LogicOp",
+	ComparisonOp: "ComparisonOp",
+	Assign:       "Assign",
+	AugAssign:    "AugAssign",
+}
+
 type Token struct {
 	kind      TokenKind
 	lexeme    []rune
@@ -32,7 +49,11 @@ type Token struct {
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf("<Token: {%d, %#v, line %d, column %d}>", t.kind, string(t.lexeme), t.line, t.col)
+	return fmt.Sprintf("<Token: {%s, %#v, line %d, column %d}>", t.kind, string(t.lexeme), t.line, t.col)
+}
+
+func (kind TokenKind) String() string {
+	return names[kind]
 }
 
 type patternEntry struct {
