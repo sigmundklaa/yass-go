@@ -142,30 +142,30 @@ func (l *Lexer) nextToken() (*Token, error) {
 	return tok, nil
 }
 
-func (l *Lexer) nextLexeme() ([]rune, string, error) {
+func (l *Lexer) nextLexeme() ([]rune, int, error) {
 	sub := l.buf[l.bufpos:]
 
 	if len(sub) == 0 {
 		// Assuming that the buffer has been properly initalized and maintained, reaching its end
 		// will mean EOF
-		return nil, "", io.EOF
+		return nil, -1, io.EOF
 	}
 
 	matches := l.reg.FindStringSubmatch(string(sub))
 
 	if matches != nil {
-		for idx, key := range l.reg.SubexpNames()[1:] {
-			lexeme := []rune(matches[idx+1])
+		for idx, m := range matches[1:] {
+			lexeme := []rune(m)
 
 			if len(lexeme) > 0 {
-				return lexeme, key, nil
+				return lexeme, idx, nil
 			}
 		}
 
 		panic(fmt.Errorf("unnamed submatch found at: %s", matches[0]))
 	}
 
-	return nil, "", fmt.Errorf("unexpected character: %v", sub)
+	return nil, -1, fmt.Errorf("unexpected character: %v", sub)
 }
 
 func (l *Lexer) advanceWith(tok *Token) {

@@ -61,17 +61,21 @@ type patternEntry struct {
 	pattern string
 }
 
-var patterns = map[string]patternEntry{
-	"bool":       {Boolean, "true|false"},
-	"assign":     {Assign, "="},
-	"augassign":  {AugAssign, `\+=|-=|\*=|/\*|\*\*=|%=`},
-	"arith":      {ArithOp, `\+|-|\*|/|\*\*|%`},
-	"logic":      {LogicOp, `!|&&|\|\|`},
-	"compare":    {ComparisonOp, "==|!=|<|>|<=|>="},
-	"hex":        {Hexadecimal, "(0x)[0-9a-fA-F]+"},
-	"dec":        {Decimal, `(\.[0-9]+)|\b([0-9]+((?:\.[0-9]+)?[eE][-+]?[0-9]+)?)\b`},
-	"identifier": {Identifier, "[a-zA-Z_]\\w*"},
-	"ws":         {Whitespace, "\\s+"},
+// When adding an entry, make sure the pattern does not contain capturing groups
+// (can be avoided by placing ?: at begging capturing group, example: /(?:[0-9]+)/)
+var patterns = []patternEntry{
+	{CommentSL, `//[^\n]*\n`},
+	{CommentML, `/\*(?:[^\*]|\*[^/])*\*/`},
+	{Boolean, "true|false"},
+	{Assign, "="},
+	{AugAssign, `\+=|-=|\*=|\*\*=|%=`},
+	{ArithOp, `\+|-|\*|/|\*\*|%`},
+	{LogicOp, `!|&&|\|\|`},
+	{ComparisonOp, "==|!=|<|>|<=|>="},
+	{Hexadecimal, "0x[0-9a-fA-F]+"},
+	{Decimal, `\.[0-9]+|\b(?:[0-9]+(?:(?:\.[0-9]+)?[eE][-+]?[0-9]+)?)\b`},
+	{Identifier, "[a-zA-Z_]\\w*"},
+	{Whitespace, "\\s+"},
 }
 
 var compiled *regexp.Regexp
@@ -85,25 +89,18 @@ func CompilePattern() *regexp.Regexp {
 	builder.WriteRune('^')
 	addOr := false
 
-	for k, v := range patterns {
+	for _, entry := range patterns {
 		if addOr {
 			builder.WriteRune('|')
 		} else {
 			addOr = true
 		}
-		fmt.Fprintf(&builder, "(?P<%s>%s)", k, v.pattern)
+		fmt.Fprintf(&builder, "(%s)", entry.pattern)
 	}
 
 	return regexp.MustCompile(builder.String())
 }
 
-func Kind(k string) TokenKind {
-	entry, ok := patterns[k]
-
-	if !ok {
-		// TODO: Maybe panic?
-		return Invalid
-	}
-
-	return entry.kind
+func Kind(idx int) TokenKind {
+	return patterns[idx].kind
 }

@@ -11,8 +11,12 @@ import (
 func main() {
 	reader := bufio.NewReader(strings.NewReader(`true 291
 
+	// this is a single line comment
+	number 3 /* end of line comment
 
-    name false
+	spanning multiples lines
+
+    */name false
 
 	18`))
 	lexer := lexer.NewLexer(reader, nil, -1)
