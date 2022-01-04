@@ -28,7 +28,7 @@ const (
 type Token struct {
 	kind      TokenKind
 	lexeme    []rune
-	line, col uint32
+	line, col uint
 }
 
 func (t *Token) String() string {

@@ -17,9 +17,9 @@ type Lexer struct {
 	channel   chan *Token
 	reg       *regexp.Regexp
 	eof       bool
-	bufSize   int
-	bufpos    uint64
-	line, col uint32
+	bufSize   uint
+	bufpos    uint
+	line, col uint
 }
 
 func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer {
@@ -37,13 +37,13 @@ func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer 
 		nil,
 		pattern,
 		false,
-		bufSize,
+		uint(bufSize),
 		0,
 		1,
 		1,
 	}
 
-	if err := l.fillBuf(bufSize); err != nil {
+	if err := l.fillBuf(uint(bufSize)); err != nil {
 		panic(err)
 	}
 
@@ -82,16 +82,16 @@ func (l *Lexer) Stream(bufSize int) chan *Token {
 	return l.channel
 }
 
-func (l *Lexer) fillBuf(length int) error {
+func (l *Lexer) fillBuf(length uint) error {
 	if l.eof {
 		return nil
 	}
 
-	if max := l.bufSize - len(l.buf); length > max {
+	if max := l.bufSize - uint(len(l.buf)); length > max {
 		return fmt.Errorf("can not add %d elements to buffer, maximum: %d", length, max)
 	}
 
-	for i := 0; i < length; i++ {
+	for i := uint(0); i < length; i++ {
 		r, _, err := l.reader.ReadRune()
 
 		if err != nil {
@@ -109,17 +109,17 @@ func (l *Lexer) fillBuf(length int) error {
 	return nil
 }
 
-func (l *Lexer) shiftBuf(length int) error {
+func (l *Lexer) shiftBuf(length uint) error {
 	if length <= 0 {
 		panic(fmt.Errorf("attempted to shift negative value: %d", length))
 	}
 
 	l.buf = l.buf[length:]
 
-	if length > int(l.bufpos) {
+	if length > l.bufpos {
 		panic(fmt.Errorf("attempted shift with length %d, can only max shift %d", length, l.bufpos))
 	}
-	l.bufpos -= uint64(length)
+	l.bufpos -= length
 
 	return l.fillBuf(length)
 }
@@ -138,7 +138,7 @@ func (l *Lexer) nextToken() (*Token, error) {
 	}
 
 	l.advanceWith(tok)
-	l.shiftBuf(len(tok.lexeme))
+	l.shiftBuf(uint(len(tok.lexeme)))
 
 	return tok, nil
 }
@@ -179,7 +179,7 @@ func (l *Lexer) advanceWith(tok *Token) {
 		}
 	}
 
-	l.bufpos += uint64(length)
+	l.bufpos += uint(length)
 }
 
 func (l *Lexer) createToken(kind TokenKind, lexeme []rune) (*Token, error) {
