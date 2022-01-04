@@ -58,7 +58,7 @@ func (l *Lexer) InitStream(bufSize int) chan *Token {
 }
 
 func (l *Lexer) nextToken() (*Token, error) {
-	value, key, err := l.nextValue()
+	value, key, err := l.nextLexeme()
 
 	if err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (l *Lexer) nextToken() (*Token, error) {
 	return tok, nil
 }
 
-func (l *Lexer) nextValue() ([]rune, string, error) {
+func (l *Lexer) nextLexeme() ([]rune, string, error) {
 	sub := l.data[l.rpos:]
 
 	if len(sub) == 0 {
@@ -85,10 +85,10 @@ func (l *Lexer) nextValue() ([]rune, string, error) {
 	matches := l.reg.FindStringSubmatch(string(sub))
 
 	for idx, key := range l.reg.SubexpNames()[1:] {
-		item := []rune(matches[idx+1])
+		lexeme := []rune(matches[idx+1])
 
-		if len(item) > 0 {
-			return item, key, nil
+		if len(lexeme) > 0 {
+			return lexeme, key, nil
 		}
 	}
 
@@ -96,12 +96,12 @@ func (l *Lexer) nextValue() ([]rune, string, error) {
 }
 
 func (l *Lexer) advanceWith(tok *Token) {
-	length := len(tok.data)
+	length := len(tok.lexeme)
 
-	for _, r := range tok.data {
+	for _, r := range tok.lexeme {
 		if r == '\n' {
 			l.line += 1
-			l.col = 0
+			l.col = 1
 		} else {
 			l.col += 1
 		}
@@ -110,6 +110,6 @@ func (l *Lexer) advanceWith(tok *Token) {
 	l.rpos += length
 }
 
-func (l *Lexer) createToken(kind TokenKind, data []rune) (*Token, error) {
-	return &Token{kind, data, l.rpos, l.line, l.col}, nil
+func (l *Lexer) createToken(kind TokenKind, lexeme []rune) (*Token, error) {
+	return &Token{kind, lexeme, l.rpos, l.line, l.col}, nil
 }

@@ -27,12 +27,12 @@ const (
 
 type Token struct {
 	kind            TokenKind
-	data            []rune
+	lexeme          []rune
 	rpos, line, col int
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf("<Token: {%d, %#v, %d, %d, %d}>", t.kind, string(t.data), t.rpos, t.line, t.col)
+	return fmt.Sprintf("<Token: {%d, %#v, %d, %d, %d}>", t.kind, string(t.lexeme), t.rpos, t.line, t.col)
 }
 
 type patternEntry struct {
