@@ -52,8 +52,7 @@ func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer 
 
 func (l *Lexer) Stream(bufSize int) chan *Token {
 	if l.channel != nil {
-		// TODO: Error / warning
-		return l.channel
+		panic(fmt.Errorf("attempted to initialize stream, already initialized"))
 	}
 
 	if bufSize < 0 {
@@ -147,6 +146,8 @@ func (l *Lexer) nextLexeme() ([]rune, string, error) {
 	sub := l.buf[l.bufpos:]
 
 	if len(sub) == 0 {
+		// Assuming that the buffer has been properly initalized and maintained, reaching its end
+		// will mean EOF
 		return nil, "", io.EOF
 	}
 
