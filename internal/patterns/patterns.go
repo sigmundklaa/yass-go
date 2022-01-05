@@ -10,12 +10,14 @@ import (
 var metapattern = map[string]string{
 	"name":         `[a-zA-Z_]\w*`,
 	"assign":       ":",
-	"regex":        `/(?:[^\\/]|[\\](?:[\\]{2})*/)*/`,
-	"string":       `(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*`,
+	"regex":        `/(?:[^\\/]|[\\](?:[\\]{2})*/|[\\][^/])*/`,
+	"string":       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
 	"sqbrac_open":  "\\[",
 	"sqbrac_close": "\\]",
 	"paran_open":   "\\(",
 	"paran_close":  "\\)",
+	"union":        "\\|",
+	"ignore":       `(?:\s+)|(?:/\*(?:[^\*]|\*[^/])*(?:\*/|$))|(?://[^\n]*\n)`,
 }
 
 func compile(pattern map[string]string) *regexp.Regexp {

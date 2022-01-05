@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"strings"
+	"os"
 
 	"github.com/SigJig/yass-go/internal/lexer"
 	"github.com/SigJig/yass-go/internal/patterns"
@@ -16,18 +16,15 @@ func main() {
 		}
 	}()
 	pattern := patterns.Meta()
-	reader := bufio.NewReader(strings.NewReader(`true 291
+	f, err := os.Open("internal/parser/grammar")
 
-	// this is a single line comment
-	number 3 /* end of line comment
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
 
-	spanning multiples lines
-	
-    */name false
-string "this is a fat st"ring boss"
-
-	18`))
-	lexer := lexer.NewLexer(reader, nil, -1)
+	reader := bufio.NewReader(f)
+	lexer := lexer.NewLexer(reader, pattern, -1)
 	ch, ech := lexer.Stream(-1)
 
 	for {
@@ -36,7 +33,10 @@ string "this is a fat st"ring boss"
 			if !ok {
 				return
 			}
-			fmt.Println(tok)
+
+			if tok.Kind != "ignore" {
+				fmt.Println(tok)
+			}
 		case err := <-ech:
 			fmt.Println(err)
 

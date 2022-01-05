@@ -12,13 +12,13 @@ const (
 )
 
 type Token struct {
-	kind      string
-	lexeme    []rune
-	line, col uint
+	Kind      string
+	Lexeme    []rune
+	Line, Col uint
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf("<Token: {%s, %#v, line %d, column %d}>", t.kind, string(t.lexeme), t.line, t.col)
+	return fmt.Sprintf("<Token: {%s, %#v, line %d, column %d}>", t.Kind, string(t.Lexeme), t.Line, t.Col)
 }
 
 type Lexer struct {
@@ -145,7 +145,7 @@ func (l *Lexer) nextToken() (*Token, error) {
 	}
 
 	l.advanceWith(tok)
-	l.shiftBuf(uint(len(tok.lexeme)))
+	l.shiftBuf(uint(len(tok.Lexeme)))
 
 	return tok, nil
 }
@@ -177,9 +177,9 @@ func (l *Lexer) nextLexeme() ([]rune, string, error) {
 }
 
 func (l *Lexer) advanceWith(tok *Token) {
-	length := len(tok.lexeme)
+	length := len(tok.Lexeme)
 
-	for _, r := range tok.lexeme {
+	for _, r := range tok.Lexeme {
 		if r == '\n' {
 			l.line += 1
 			l.col = 1
