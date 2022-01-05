@@ -28,7 +28,7 @@ var metaprod = map[string][]string{
 		"$prod*",
 	},
 	"$prod": {
-		"name assign $expr+ newline",
+		"name assign $expr newline",
 	},
 	"$expr": {
 		"paran_open $expr paran_close",
@@ -37,6 +37,7 @@ var metaprod = map[string][]string{
 		"$opt_ext",
 		"regex",
 		"string",
+		"$expr",
 	},
 	"$opt_ext": {
 		"sqbrac_open $expr sqbrac_open",
@@ -52,7 +53,14 @@ const (
 	OPT                       // Optional (? suffix)
 )
 
-const EPSILON = `\epsilon`
+func (pf prodFlag) hasEpsilon() bool {
+	return pf&STAR > 0 || pf&OPT != 0
+}
+
+const (
+	EPSILON = `\epsilon`
+	END     = `\end`
+)
 
 var flagChars = []byte{'+', '*', '?'}
 
@@ -73,6 +81,11 @@ type gen struct {
 	follow      map[string]stringset
 	firstCache  map[string]stringset
 	productions map[string][]prod
+	startpoint  string
+}
+
+func isTerminal(sym string) bool {
+	return sym[0] != '$'
 }
 
 func createRule(sym string) prodtoken {
@@ -105,8 +118,13 @@ func createRules(raw string) (rules []prodtoken) {
 	return
 }
 
-func newGen(productions map[string][]string) *gen {
-	g := &gen{make(map[string]stringset), make(map[string]stringset), make(map[string][]prod)}
+func newGen(productions map[string][]string, startpoint string) *gen {
+	g := &gen{
+		make(map[string]stringset),
+		make(map[string]stringset),
+		make(map[string][]prod),
+		startpoint,
+	}
 
 	for name, union := range productions {
 		prods := []prod{}
@@ -117,6 +135,8 @@ func newGen(productions map[string][]string) *gen {
 
 		g.productions[name] = prods
 	}
+
+	g.constructAllFollows()
 
 	return g
 }
@@ -131,6 +151,61 @@ func inStack(content string, stack []string) bool {
 	return false
 }
 
+func (g *gen) constructFollows(production prod) {
+	for i, length := 0, len(production.r); i < length; i++ {
+		current := production.at(i).content
+
+		if isTerminal(current) {
+			continue
+		}
+
+		for offset, cont := 1, true; cont; offset++ {
+			if i+offset >= length {
+				// TODO: This does not work in multilpe cases
+				// May need a custom structure that holds a reference to all the maps
+				g.follow[current] = g.follow[production.name]
+				break
+			}
+
+			cont = false
+
+			nxt := production.at(i + offset)
+			nxtContent := nxt.content
+
+			if isTerminal(nxtContent) {
+				g.follow[current].add(nxtContent)
+				break
+			} else if nxt.flag.hasEpsilon() {
+				g.follow[current] = g.follow[production.name]
+				break
+			} else {
+				deriv := g.first(nxtContent, nil)
+
+				if deriv.contains(EPSILON) {
+					deriv.delete(EPSILON)
+					cont = true
+				}
+
+				g.follow[current].merge(deriv)
+			}
+		}
+	}
+}
+
+func (g *gen) constructAllFollows() {
+	for k := range g.productions {
+		g.follow[k] = make(stringset)
+	}
+
+	g.follow[g.startpoint].add(END)
+
+	for _, union := range g.productions {
+		for _, production := range union {
+			g.constructFollows(production)
+		}
+	}
+}
+
 // Return possible terminals
 // Stack prevents infinite recursion
 func (g *gen) first(rule string, stack []string) stringset {
@@ -142,16 +217,16 @@ func (g *gen) first(rule string, stack []string) stringset {
 		return cached
 	}
 
-	if rule[0] == '$' {
-		for _, union := range g.productions[rule] {
+	if !isTerminal(rule) {
+		for _, production := range g.productions[rule] {
 			// Union: One of all possible productions for "rule"
-			for i, cont := 0, true; i < len(union.r) && cont; i++ {
+			for i, cont := 0, true; i < len(production.r) && cont; i++ {
 				// Normally only one iteration, but if L -> RA, and FIRST(L) -> FIRST(R) where
 				// R is a derivative of epsilon we can substitue R and continue to A,
 				// resulting in FIRST(L) -> FIRST(A)
-				unionAt := union.at(i)
+				prodAt := production.at(i)
 
-				if content := unionAt.content; content != rule && !inStack(content, stack) {
+				if content := prodAt.content; content != rule && !inStack(content, stack) {
 					stack := append(stack, rule)
 					deriv := g.first(content, stack)
 
@@ -165,7 +240,8 @@ func (g *gen) first(rule string, stack []string) stringset {
 
 					set.merge(deriv)
 
-					if unionAt.flag&STAR != 0 || unionAt.flag&OPT != 0 {
+					// Because epsilon was found on this non-terminal, we add it
+					if prodAt.flag.hasEpsilon() {
 						set.add(EPSILON)
 					}
 				} else {
@@ -192,10 +268,10 @@ func (p *prod) at(i int) prodtoken {
 }
 
 func Test() interface{} {
-	g := newGen(metaprod)
+	g := newGen(metaprod, "$start")
 
-	for k := range g.productions {
-		fmt.Printf("%s => %v\n", k, g.first(k, nil))
+	for k, v := range g.follow {
+		fmt.Printf("%s => %v\n", k, v)
 	}
 
 	return g.first("$opt_ext", nil)
