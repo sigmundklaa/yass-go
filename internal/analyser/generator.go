@@ -40,7 +40,7 @@ var metaprod = map[string][]string{
 		"$expr",
 	},
 	"$opt_ext": {
-		"sqbrac_open $expr sqbrac_open",
+		"sqbrac_open $expr sqbrac_close",
 		"$expr question_mark",
 	},
 }
@@ -172,6 +172,7 @@ func (g *gen) constructFollows(production prod) {
 			nxt := production.at(i + offset)
 			nxtContent := nxt.content
 
+			// TODO: Fix +* operations
 			if isTerminal(nxtContent) {
 				g.follow[current].add(nxtContent)
 				break
