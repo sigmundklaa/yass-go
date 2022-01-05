@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/SigJig/yass-go/internal/lexer"
+	"github.com/SigJig/yass-go/internal/patterns"
 )
 
 func main() {
@@ -14,6 +15,7 @@ func main() {
 			fmt.Println(r)
 		}
 	}()
+	pattern := patterns.Meta()
 	reader := bufio.NewReader(strings.NewReader(`true 291
 
 	// this is a single line comment

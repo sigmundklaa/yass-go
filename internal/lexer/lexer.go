@@ -11,6 +11,16 @@ const (
 	DEFAULT_RUNEBUF_SIZE = 100
 )
 
+type Token struct {
+	kind      string
+	lexeme    []rune
+	line, col uint
+}
+
+func (t *Token) String() string {
+	return fmt.Sprintf("<Token: {%s, %#v, line %d, column %d}>", t.kind, string(t.lexeme), t.line, t.col)
+}
+
 type Lexer struct {
 	buf       []rune
 	reader    io.RuneReader
@@ -23,10 +33,6 @@ type Lexer struct {
 }
 
 func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer {
-	if pattern == nil {
-		pattern = CompilePattern()
-	}
-
 	if bufSize < 0 {
 		bufSize = DEFAULT_RUNEBUF_SIZE
 	}
@@ -132,7 +138,7 @@ func (l *Lexer) nextToken() (*Token, error) {
 		return nil, err
 	}
 
-	tok, err := l.createToken(Kind(key), []rune(lexeme))
+	tok, err := l.createToken(key, []rune(lexeme))
 
 	if err != nil {
 		panic(err)
@@ -144,30 +150,30 @@ func (l *Lexer) nextToken() (*Token, error) {
 	return tok, nil
 }
 
-func (l *Lexer) nextLexeme() ([]rune, int, error) {
+func (l *Lexer) nextLexeme() ([]rune, string, error) {
 	sub := l.buf[l.bufpos:]
 
 	if len(sub) == 0 {
 		// Assuming that the buffer has been properly initalized and maintained, reaching its end
 		// will mean EOF
-		return nil, -1, io.EOF
+		return nil, "", io.EOF
 	}
 
 	matches := l.reg.FindStringSubmatch(string(sub))
 
 	if matches != nil {
-		for idx, m := range matches[1:] {
-			lexeme := []rune(m)
+		for idx, name := range l.reg.SubexpNames()[1:] {
+			lexeme := []rune(matches[idx+1])
 
 			if len(lexeme) > 0 {
-				return lexeme, idx, nil
+				return lexeme, name, nil
 			}
 		}
 
 		panic(l.errf("unnamed submatch found at: %s", matches[0]))
 	}
 
-	return nil, -1, l.errf("unable to process character at: %#v", string(sub))
+	return nil, "", l.errf("unable to process character at: %#v", string(sub))
 }
 
 func (l *Lexer) advanceWith(tok *Token) {
@@ -186,9 +192,9 @@ func (l *Lexer) advanceWith(tok *Token) {
 }
 
 func (l *Lexer) errf(fmtstr string, args ...interface{}) error {
-	return fmt.Errorf("Lexer error at line %d, column %d: %s", l.line, l.col, fmt.Sprintf(fmtstr, args...))
+	return fmt.Errorf("lexer error at line %d, column %d: %s", l.line, l.col, fmt.Sprintf(fmtstr, args...))
 }
 
-func (l *Lexer) createToken(kind TokenKind, lexeme []rune) (*Token, error) {
+func (l *Lexer) createToken(kind string, lexeme []rune) (*Token, error) {
 	return &Token{kind, lexeme, l.line, l.col}, nil
 }
