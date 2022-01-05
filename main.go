@@ -7,11 +7,10 @@ import (
 
 	"github.com/SigJig/yass-go/internal/analyser"
 	"github.com/SigJig/yass-go/internal/lexer"
-	"github.com/SigJig/yass-go/internal/patterns"
 )
 
 func testLex() {
-	pattern := patterns.Compile(analyser.Metapattern)
+	pattern := lexer.CompilePattern(analyser.Metapattern)
 	f, err := os.Open("internal/analyser/grammar")
 
 	if err != nil {

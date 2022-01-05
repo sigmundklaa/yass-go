@@ -1,4 +1,4 @@
-package patterns
+package lexer
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func Compile(pattern map[string]string) *regexp.Regexp {
+func CompilePattern(pattern map[string]string) *regexp.Regexp {
 	var builder strings.Builder
 	builder.WriteString("^(?:")
 	addOr := false
@@ -24,12 +24,12 @@ func Compile(pattern map[string]string) *regexp.Regexp {
 	return regexp.MustCompile(builder.String())
 }
 
-type Raw map[string]struct {
+type RawPattern map[string]struct {
 	pattern string
 	isRegex bool
 }
 
-func Construct(pattern Raw) *regexp.Regexp {
+func ConstructPattern(pattern RawPattern) *regexp.Regexp {
 	var n = map[string]string{}
 
 	for k, v := range pattern {
@@ -41,5 +41,5 @@ func Construct(pattern Raw) *regexp.Regexp {
 		}
 	}
 
-	return Compile(n)
+	return CompilePattern(n)
 }
