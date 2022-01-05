@@ -5,18 +5,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/SigJig/yass-go/internal/analyser"
 	"github.com/SigJig/yass-go/internal/lexer"
 	"github.com/SigJig/yass-go/internal/patterns"
 )
 
-func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println(r)
-		}
-	}()
-	pattern := patterns.Meta()
-	f, err := os.Open("internal/parser/grammar")
+func testLex() {
+	pattern := patterns.Compile(analyser.Metapattern)
+	f, err := os.Open("internal/analyser/grammar")
 
 	if err != nil {
 		panic(err)
@@ -43,4 +39,12 @@ func main() {
 			return
 		}
 	}
+}
+
+func testParse() {
+	fmt.Println(analyser.Test())
+}
+
+func main() {
+	testParse()
 }

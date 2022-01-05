@@ -19,4 +19,4 @@ comment: COMMENT_SL | COMMENT_ML
 COMMENT_SL: /\/\/[^\n]*\n/
 COMMENT_ML: /\/\*(?:[^\*]|\*[^\/])*(?:\*\/|$)/
 
-WHITESPACE: /\s+/
+WHITESPACE: /[^\S\r\n]+/

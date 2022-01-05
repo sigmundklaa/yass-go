@@ -6,21 +6,7 @@ import (
 	"strings"
 )
 
-// This pattern are all regex patterns, so when adding an entry make sure it is properly escaped
-var metapattern = map[string]string{
-	"name":         `[a-zA-Z_]\w*`,
-	"assign":       ":",
-	"regex":        `/(?:[^\\/]|[\\](?:[\\]{2})*/|[\\][^/])*/`,
-	"string":       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
-	"sqbrac_open":  "\\[",
-	"sqbrac_close": "\\]",
-	"paran_open":   "\\(",
-	"paran_close":  "\\)",
-	"union":        "\\|",
-	"ignore":       `(?:\s+)|(?:/\*(?:[^\*]|\*[^/])*(?:\*/|$))|(?://[^\n]*\n)`,
-}
-
-func compile(pattern map[string]string) *regexp.Regexp {
+func Compile(pattern map[string]string) *regexp.Regexp {
 	var builder strings.Builder
 	builder.WriteString("^(?:")
 	addOr := false
@@ -55,9 +41,5 @@ func Construct(pattern Raw) *regexp.Regexp {
 		}
 	}
 
-	return compile(n)
-}
-
-func Meta() *regexp.Regexp {
-	return compile(metapattern)
+	return Compile(n)
 }
