@@ -37,7 +37,7 @@ var metaprod = map[string][]string{
 		"$opt_ext",
 		"regex",
 		"string",
-		"$expr+",
+		//"$expr+",
 	},
 	"$opt_ext": {
 		"sqbrac_open $expr sqbrac_close",
@@ -80,11 +80,17 @@ type item struct {
 	symbols  []symbol
 }
 
+type state struct {
+	kernel []item
+	trans  map[string]**state // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+}
+
 type gen struct {
 	follow      map[string]stringset
 	firstCache  map[string]stringset
 	productions map[string][]item
 	startpoint  string
+	kernelMap   map[string]*state
 }
 
 func isTerminal(symname string) bool {
@@ -127,6 +133,7 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 		make(map[string]stringset),
 		make(map[string][]item),
 		startpoint,
+		make(map[string]*state),
 	}
 
 	for symname, union := range productions {
@@ -268,21 +275,112 @@ func (g *gen) first(symname string, stack []string) stringset {
 	return set
 }
 
+func (g *gen) closureFromItem(itm item) []item {
+	cur := itm.cur()
+	content := cur.content
+
+	if isTerminal(content) || content == itm.prodname {
+		return nil
+	}
+
+	return g.productions[content]
+}
+
 func (g *gen) closure(symname string) []item {
 	cls := g.productions[symname]
 
 	for _, itm := range cls {
-		cur := itm.cur()
-		content := cur.content
-
-		if isTerminal(content) || content == symname {
-			continue
-		}
-
-		cls = append(cls, g.productions[content]...)
+		cls = append(cls, g.closureFromItem(itm)...)
 	}
 
 	return cls
+}
+
+func (g *gen) constructState(spointer **state) {
+	s := *spointer
+	key := kernelMapKey(s.kernel)
+	fmt.Println(key, "\n")
+	existing := g.kernelMap[key]
+
+	if existing != nil {
+		*spointer = existing
+		return
+	}
+
+	for _, itm := range s.kernel {
+		cur := itm.cur()
+
+		for fterm := range g.first(cur.content, nil) {
+			trs := s.trans[fterm]
+			advanced, err := itm.advance(fterm)
+
+			if trs == nil {
+				tmp := &state{nil, make(map[string]**state)}
+				s.trans[fterm] = &tmp
+				trs = &tmp
+			}
+
+			if err == nil {
+				(*trs).kernel = append((*trs).kernel, advanced)
+			}
+		}
+	}
+
+	g.kernelMap[key] = s
+
+	for _, st := range s.trans {
+		g.constructState(st)
+	}
+}
+
+func (s *state) print(x int) {
+	b := strings.Builder{}
+
+	for i := 0; i < x; i++ {
+		b.WriteRune('\t')
+	}
+
+	for k, v := range s.trans {
+		fmt.Printf("%s%s:\n", b.String(), k)
+
+		if kernelMapKey((*v).kernel) == kernelMapKey(s.kernel) {
+			fmt.Printf("%s\trepeat\n", b.String())
+		} else {
+			(*v).print(x + 1)
+		}
+	}
+}
+
+func (g *gen) constructStateSymname(symname string) *state {
+	s := &state{g.closure(symname), make(map[string]**state)}
+	g.constructState(&s)
+
+	return s
+}
+
+func kernelMapKey(items []item) string {
+	b := strings.Builder{}
+
+	for _, i := range items {
+		b.WriteString(fmt.Sprintf("%s|", i.String()))
+	}
+
+	return b.String()
+}
+
+func (i *item) String() string {
+	b := strings.Builder{}
+	b.WriteString(fmt.Sprintf("%s:", i.prodname))
+
+	for idx, sym := range i.symbols {
+		if idx == i.dotindex {
+			b.WriteRune('.')
+		}
+
+		b.WriteString(fmt.Sprintf("%s:%d", sym.content, sym.flag))
+	}
+
+	return b.String()
 }
 
 func (i *item) cur() symbol {
@@ -291,6 +389,19 @@ func (i *item) cur() symbol {
 
 func (i *item) at(index int) symbol {
 	return i.symbols[index]
+}
+
+func (i *item) advance(terminal string) (item, error) {
+	// Returns a copy with position advanced by one
+	n := *i
+	n.symbols[n.dotindex].content = terminal
+	n.dotindex++
+
+	if i.dotindex > len(i.symbols) {
+		return n, fmt.Errorf("advance reached eof")
+	}
+
+	return n, nil
 }
 
 func TestFollow() interface{} {
@@ -313,5 +424,13 @@ func TestClosure() interface{} {
 		}
 	}
 
+	return 0
+}
+
+func TestStates() interface{} {
+	g := newGen(metaprod, "$start")
+	s := g.constructStateSymname("$expr")
+
+	s.print(1)
 	return 0
 }
