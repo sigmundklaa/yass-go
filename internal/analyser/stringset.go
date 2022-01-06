@@ -30,6 +30,16 @@ func (set stringset) delete(items ...string) {
 	}
 }
 
+func (set stringset) copy() stringset {
+	nw := make(stringset)
+
+	for k, v := range set {
+		nw[k] = v
+	}
+
+	return nw
+}
+
 func (set stringset) String() string {
 	return fmt.Sprintf("%v", set.slice())
 }

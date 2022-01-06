@@ -68,37 +68,36 @@ const (
 
 var flagChars = []byte{'+', '*', '?'}
 
-type prodtoken struct {
+type symbol struct {
 	content string
 	flag    prodFlag
 }
 
-// name: prodtoken1 prodtoken2? prodtoken3+
-type prod struct {
-	name     string
+// name: symbol1 symbol2? symbol3+
+type item struct {
+	prodname string
 	dotindex int
-	r        []prodtoken
-	g        *gen
+	symbols  []symbol
 }
 
 type gen struct {
 	follow      map[string]stringset
 	firstCache  map[string]stringset
-	productions map[string][]prod
+	productions map[string][]item
 	startpoint  string
 }
 
-func isTerminal(sym string) bool {
-	return sym[0] != '$'
+func isTerminal(symname string) bool {
+	return symname[0] != '$'
 }
 
-func createRule(sym string) prodtoken {
+func createRule(symname string) symbol {
 	var flag prodFlag
 
-	for i := len(sym) - 1; i >= 0; i-- {
+	for i := len(symname) - 1; i >= 0; i-- {
 		cont := func() bool {
 			for idx, r := range flagChars {
-				if sym[i] == r {
+				if symname[i] == r {
 					flag |= 1 << idx
 					return true
 				}
@@ -108,14 +107,14 @@ func createRule(sym string) prodtoken {
 		}()
 
 		if !cont {
-			return prodtoken{sym[:i+1], flag}
+			return symbol{symname[:i+1], flag}
 		}
 	}
 
-	panic(fmt.Errorf("bad rule %s", sym))
+	panic(fmt.Errorf("bad rule %s", symname))
 }
 
-func createRules(raw string) (rules []prodtoken) {
+func createRules(raw string) (rules []symbol) {
 	for _, sym := range strings.Split(raw, " ") {
 		rules = append(rules, createRule(sym))
 	}
@@ -126,18 +125,18 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 	g := &gen{
 		make(map[string]stringset),
 		make(map[string]stringset),
-		make(map[string][]prod),
+		make(map[string][]item),
 		startpoint,
 	}
 
-	for name, union := range productions {
-		prods := []prod{}
+	for symname, union := range productions {
+		prods := []item{}
 
 		for _, u := range union {
-			prods = append(prods, prod{name, 0, createRules(u), g})
+			prods = append(prods, item{symname, 0, createRules(u)})
 		}
 
-		g.productions[name] = prods
+		g.productions[symname] = prods
 	}
 
 	g.constructAllFollows()
@@ -155,16 +154,16 @@ func inStack(content string, stack []string) bool {
 	return false
 }
 
-func (g *gen) constructFollows(production prod) {
-	for i, length := 0, len(production.r); i < length; i++ {
-		currentprod := production.at(i)
-		current := currentprod.content
+func (g *gen) constructFollows(itm item) {
+	for i, length := 0, len(itm.symbols); i < length; i++ {
+		currentitm := itm.at(i)
+		current := currentitm.content
 
 		if isTerminal(current) {
 			continue
 		}
 
-		if currentprod.flag.canRepeat() {
+		if currentitm.flag.canRepeat() {
 			g.follow[current].merge(g.first(current, nil))
 		}
 
@@ -172,21 +171,21 @@ func (g *gen) constructFollows(production prod) {
 			if i+offset >= length {
 				// TODO: This does not work in multilpe cases
 				// May need a custom structure that holds a reference to all the maps
-				g.follow[current] = g.follow[production.name]
+				g.follow[current] = g.follow[itm.prodname]
 				break
 			}
 
 			cont = false
 
-			nxt := production.at(i + offset)
-			nxtContent := nxt.content
+			nxtitm := itm.at(i + offset)
+			nxtContent := nxtitm.content
 
 			// TODO: Fix +* operations
 			if isTerminal(nxtContent) {
 				g.follow[current].add(nxtContent)
 				break
-			} else if nxt.flag.hasEpsilon() {
-				g.follow[current] = g.follow[production.name]
+			} else if nxtitm.flag.hasEpsilon() {
+				g.follow[current] = g.follow[itm.prodname]
 				break
 			} else {
 				deriv := g.first(nxtContent, nil)
@@ -203,8 +202,8 @@ func (g *gen) constructFollows(production prod) {
 }
 
 func (g *gen) constructAllFollows() {
-	for k := range g.productions {
-		g.follow[k] = make(stringset)
+	for symname := range g.productions {
+		g.follow[symname] = make(stringset)
 	}
 
 	g.follow[g.startpoint].add(END)
@@ -218,26 +217,26 @@ func (g *gen) constructAllFollows() {
 
 // Return possible terminals
 // Stack prevents infinite recursion
-func (g *gen) first(rule string, stack []string) stringset {
+func (g *gen) first(symname string, stack []string) stringset {
 	set := make(stringset)
 	addToCache := len(stack) == 0
-	cached, ok := g.firstCache[rule]
+	cached, ok := g.firstCache[symname]
 
 	if ok {
 		return cached
 	}
 
-	if !isTerminal(rule) {
-		for _, production := range g.productions[rule] {
+	if !isTerminal(symname) {
+		for _, production := range g.productions[symname] {
 			// Union: One of all possible productions for "rule"
-			for i, cont := 0, true; i < len(production.r) && cont; i++ {
+			for i, cont := 0, true; i < len(production.symbols) && cont; i++ {
 				// Normally only one iteration, but if L -> RA, and FIRST(L) -> FIRST(R) where
 				// R is a derivative of epsilon we can substitue R and continue to A,
 				// resulting in FIRST(L) -> FIRST(A)
 				prodAt := production.at(i)
 
-				if content := prodAt.content; content != rule && !inStack(content, stack) {
-					stack := append(stack, rule)
+				if content := prodAt.content; content != symname && !inStack(content, stack) {
+					stack := append(stack, symname)
 					deriv := g.first(content, stack)
 
 					// If an epsilon is encountered, we substitute current and keep iterating
@@ -260,24 +259,41 @@ func (g *gen) first(rule string, stack []string) stringset {
 			}
 		}
 	} else {
-		set.add(rule)
+		set.add(symname)
 	}
 
 	if addToCache {
-		g.firstCache[rule] = set
+		g.firstCache[symname] = set
 	}
 	return set
 }
 
-func (p *prod) cur() prodtoken {
-	return p.at(p.dotindex)
+func (g *gen) closure(symname string) []item {
+	cls := g.productions[symname]
+
+	for _, itm := range cls {
+		cur := itm.cur()
+		content := cur.content
+
+		if isTerminal(content) || content == symname {
+			continue
+		}
+
+		cls = append(cls, g.productions[content]...)
+	}
+
+	return cls
 }
 
-func (p *prod) at(i int) prodtoken {
-	return p.r[i]
+func (i *item) cur() symbol {
+	return i.at(i.dotindex)
 }
 
-func Test() interface{} {
+func (i *item) at(index int) symbol {
+	return i.symbols[index]
+}
+
+func TestFollow() interface{} {
 	g := newGen(metaprod, "$start")
 
 	for k, v := range g.follow {
@@ -285,4 +301,17 @@ func Test() interface{} {
 	}
 
 	return g.first("$opt_ext", nil)
+}
+
+func TestClosure() interface{} {
+	g := newGen(metaprod, "$start")
+
+	for k, _ := range g.productions {
+		fmt.Printf("Closure for %s:\n", k)
+		for _, item := range g.closure(k) {
+			fmt.Printf("\t%s -> %v\n", item.prodname, item.symbols)
+		}
+	}
+
+	return 0
 }

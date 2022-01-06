@@ -41,7 +41,7 @@ func testLex() {
 }
 
 func testParse() {
-	fmt.Println(analyser.Test())
+	fmt.Println(analyser.TestClosure())
 }
 
 func main() {
