@@ -37,7 +37,7 @@ var metaprod = map[string][]string{
 		"$opt_ext",
 		"regex",
 		"string",
-		"$expr",
+		"$expr+",
 	},
 	"$opt_ext": {
 		"sqbrac_open $expr sqbrac_close",
@@ -54,7 +54,11 @@ const (
 )
 
 func (pf prodFlag) hasEpsilon() bool {
-	return pf&STAR > 0 || pf&OPT != 0
+	return (pf & (STAR | OPT)) > 0
+}
+
+func (pf prodFlag) canRepeat() bool {
+	return (pf & (PLUS | STAR)) > 0
 }
 
 const (
@@ -153,10 +157,15 @@ func inStack(content string, stack []string) bool {
 
 func (g *gen) constructFollows(production prod) {
 	for i, length := 0, len(production.r); i < length; i++ {
-		current := production.at(i).content
+		currentprod := production.at(i)
+		current := currentprod.content
 
 		if isTerminal(current) {
 			continue
+		}
+
+		if currentprod.flag.canRepeat() {
+			g.follow[current].merge(g.first(current, nil))
 		}
 
 		for offset, cont := 1, true; cont; offset++ {
