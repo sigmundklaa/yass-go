@@ -82,7 +82,28 @@ type item struct {
 
 type state struct {
 	kernel []item
-	trans  map[string]**state // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+	trans  map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+}
+
+type proxyState struct {
+	key string
+	st  *state
+}
+
+func newProxy(key string) *proxyState {
+	return &proxyState{key, &state{nil, make(map[string]*proxyState)}}
+}
+
+func (ps *proxyState) replace(s *state) {
+	ps.st = s
+}
+
+func (ps *proxyState) state() *state {
+	return ps.st
+}
+
+func (ps *proxyState) String() string {
+	return fmt.Sprintf("<proxyState: %s>", ps.key)
 }
 
 type gen struct {
@@ -163,7 +184,7 @@ func inStack(content string, stack []string) bool {
 
 func (g *gen) constructFollows(itm item) {
 	for i, length := 0, len(itm.symbols); i < length; i++ {
-		currentitm := itm.at(i)
+		currentitm := itm.symbols[i]
 		current := currentitm.content
 
 		if isTerminal(current) {
@@ -184,7 +205,7 @@ func (g *gen) constructFollows(itm item) {
 
 			cont = false
 
-			nxtitm := itm.at(i + offset)
+			nxtitm := itm.symbols[i+offset]
 			nxtContent := nxtitm.content
 
 			// TODO: Fix +* operations
@@ -240,7 +261,7 @@ func (g *gen) first(symname string, stack []string) stringset {
 				// Normally only one iteration, but if L -> RA, and FIRST(L) -> FIRST(R) where
 				// R is a derivative of epsilon we can substitue R and continue to A,
 				// resulting in FIRST(L) -> FIRST(A)
-				prodAt := production.at(i)
+				prodAt := production.symbols[i]
 
 				if content := prodAt.content; content != symname && !inStack(content, stack) {
 					stack := append(stack, symname)
@@ -275,60 +296,68 @@ func (g *gen) first(symname string, stack []string) stringset {
 	return set
 }
 
-func (g *gen) closureFromItem(itm item) []item {
-	cur := itm.cur()
-	content := cur.content
+func (g *gen) closureFromItem(itm item, stack []string) []item {
+	cur, err := itm.cur()
 
-	if isTerminal(content) || content == itm.prodname {
+	if err != nil {
 		return nil
 	}
 
-	return g.productions[content]
+	content := cur.content
+
+	if isTerminal(content) || inStack(content, stack) {
+		return nil
+	}
+
+	return g.closure(content, stack)
 }
 
-func (g *gen) closure(symname string) []item {
+func (g *gen) closure(symname string, stack []string) []item {
 	cls := g.productions[symname]
+	stack = append(stack, symname)
 
 	for _, itm := range cls {
-		cls = append(cls, g.closureFromItem(itm)...)
+		cls = append(cls, g.closureFromItem(itm, stack)...)
 	}
 
 	return cls
 }
 
-func (g *gen) constructState(spointer **state) {
-	s := *spointer
-	key := kernelMapKey(s.kernel)
-	fmt.Println(key, "\n")
+func (g *gen) constructState(proxy *proxyState) {
+	st := proxy.state()
+	key := kernelMapKey(st.kernel)
 	existing := g.kernelMap[key]
 
 	if existing != nil {
-		*spointer = existing
+		proxy.replace(existing)
 		return
 	}
 
-	for _, itm := range s.kernel {
-		cur := itm.cur()
+	for _, itm := range st.kernel {
+		cur, err := itm.cur()
+
+		if err != nil {
+			continue
+		}
+
+		copy := itm.advance() // this needs to advance tho??!
 
 		for fterm := range g.first(cur.content, nil) {
-			trs := s.trans[fterm]
-			advanced, err := itm.advance(fterm)
+			trprox := st.trans[fterm]
 
-			if trs == nil {
-				tmp := &state{nil, make(map[string]**state)}
-				s.trans[fterm] = &tmp
-				trs = &tmp
+			if trprox == nil {
+				trprox = newProxy(fterm)
+				st.trans[fterm] = trprox
 			}
 
-			if err == nil {
-				(*trs).kernel = append((*trs).kernel, advanced)
-			}
+			trstate := trprox.state()
+			trstate.kernel = append(trstate.kernel, copy)
 		}
 	}
 
-	g.kernelMap[key] = s
+	g.kernelMap[key] = st
 
-	for _, st := range s.trans {
+	for _, st := range st.trans {
 		g.constructState(st)
 	}
 }
@@ -343,19 +372,20 @@ func (s *state) print(x int) {
 	for k, v := range s.trans {
 		fmt.Printf("%s%s:\n", b.String(), k)
 
-		if kernelMapKey((*v).kernel) == kernelMapKey(s.kernel) {
+		if kernelMapKey(v.state().kernel) == kernelMapKey(s.kernel) {
 			fmt.Printf("%s\trepeat\n", b.String())
 		} else {
-			(*v).print(x + 1)
+			v.state().print(x + 1)
 		}
 	}
 }
 
 func (g *gen) constructStateSymname(symname string) *state {
-	s := &state{g.closure(symname), make(map[string]**state)}
-	g.constructState(&s)
+	proxy := newProxy(symname)
+	proxy.state().kernel = g.closure(symname, nil)
+	g.constructState(proxy)
 
-	return s
+	return proxy.state() // We call state again as it may have changed after constructState
 }
 
 func kernelMapKey(items []item) string {
@@ -383,25 +413,24 @@ func (i *item) String() string {
 	return b.String()
 }
 
-func (i *item) cur() symbol {
+func (i *item) cur() (symbol, error) {
 	return i.at(i.dotindex)
 }
 
-func (i *item) at(index int) symbol {
-	return i.symbols[index]
+func (i *item) at(index int) (symbol, error) {
+	if index >= len(i.symbols) {
+		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
+	}
+	return i.symbols[index], nil
 }
 
-func (i *item) advance(terminal string) (item, error) {
+func (i *item) advance() item {
 	// Returns a copy with position advanced by one
 	n := *i
-	n.symbols[n.dotindex].content = terminal
+	//n.symbols[n.dotindex].content = terminal
 	n.dotindex++
 
-	if i.dotindex > len(i.symbols) {
-		return n, fmt.Errorf("advance reached eof")
-	}
-
-	return n, nil
+	return n
 }
 
 func TestFollow() interface{} {
@@ -419,7 +448,7 @@ func TestClosure() interface{} {
 
 	for k, _ := range g.productions {
 		fmt.Printf("Closure for %s:\n", k)
-		for _, item := range g.closure(k) {
+		for _, item := range g.closure(k, nil) {
 			fmt.Printf("\t%s -> %v\n", item.prodname, item.symbols)
 		}
 	}
