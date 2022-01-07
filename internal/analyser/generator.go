@@ -514,18 +514,8 @@ func TestStates() interface{} {
 
 	defer f.Close()
 
-	//builder := &strings.Builder{}
-
 	for idx, s := range g.states {
 		fmt.Fprintln(f, idx)
-		//estate := false
-		/*
-			for _, kern := range s.kernel {
-				if kern.dotindex >= len(kern.symbols) {
-					estate = true
-					break
-				}
-			}*/
 
 		for _, prox := range s.trans {
 			fmt.Fprintf(f, "\t%s (%v) => State %d\n", prox.key, prodString(prox.state().kernel), g.findState(prox.state()))
@@ -536,8 +526,6 @@ func TestStates() interface{} {
 		}
 	}
 	fmt.Printf("%d states printed\n", len(g.states))
-
-	//f.WriteString(builder.String())
 
 	return 0
 }
