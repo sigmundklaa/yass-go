@@ -62,11 +62,6 @@ func (pf prodFlag) canRepeat() bool {
 	return (pf & (PLUS | STAR)) > 0
 }
 
-const (
-	EPSILON = `\epsilon`
-	END     = `\end`
-)
-
 var flagChars = []byte{'+', '*', '?'}
 
 type symbol struct {
@@ -74,52 +69,14 @@ type symbol struct {
 	flag    prodFlag
 }
 
+const (
+	EPSILON = `\epsilon`
+	END     = `\end`
+)
+
 var (
 	ENDSYMBOL = symbol{END, 0}
 )
-
-// name: symbol1 symbol2? symbol3+
-type item struct {
-	prodname string
-	dotindex int
-	symbols  []symbol
-}
-
-type state struct {
-	kernel []item
-	trans  map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
-}
-
-type proxyState struct {
-	key string
-	st  *state
-}
-
-func newProxy(key string) *proxyState {
-	return &proxyState{key, &state{nil, make(map[string]*proxyState)}}
-}
-
-func (ps *proxyState) replace(s *state) {
-	ps.st = s
-}
-
-func (ps *proxyState) state() *state {
-	return ps.st
-}
-
-func (ps *proxyState) String() string {
-	return fmt.Sprintf("<proxyState: %s>", ps.key)
-}
-
-type gen struct {
-	startpoint  string
-	follow      map[string]stringset
-	firstCache  map[string]stringset
-	productions map[string][]item
-	kernelMap   map[string]*state
-	closures    map[string][]item
-	states      []*state
-}
 
 func isTerminal(symname string) bool {
 	return symname[0] != '$'
@@ -155,6 +112,95 @@ func createRules(raw string) (rules []symbol) {
 	return
 }
 
+// name: symbol1 symbol2? symbol3+
+type item struct {
+	prodname string
+	dotindex int
+	symbols  []symbol
+}
+
+func (i *item) String() string {
+	b := strings.Builder{}
+	b.WriteString(fmt.Sprintf("%s:", i.prodname))
+
+	for idx, sym := range i.symbols {
+		if idx == i.dotindex {
+			b.WriteRune('.')
+		}
+
+		b.WriteString(fmt.Sprintf("%s:%d", sym.content, sym.flag))
+	}
+
+	return b.String()
+}
+
+func (i *item) cur() (symbol, error) {
+	return i.at(i.dotindex)
+}
+
+func (i *item) at(index int) (symbol, error) {
+	if index >= len(i.symbols) {
+		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
+	}
+	return i.symbols[index], nil
+}
+
+func (i *item) advance() item {
+	// Returns a copy with position advanced by one
+	n := *i
+	//n.symbols[n.dotindex].content = terminal
+	n.dotindex++
+
+	return n
+}
+
+type state struct {
+	kernel []item
+	trans  map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+}
+
+type proxyState struct {
+	key string
+	st  *state
+}
+
+func newProxy(key string) *proxyState {
+	return &proxyState{key, &state{nil, make(map[string]*proxyState)}}
+}
+
+func (st *state) transition(symname string) *proxyState {
+	trprox := st.trans[symname]
+
+	if trprox == nil {
+		trprox = newProxy(symname)
+		st.trans[symname] = trprox
+	}
+
+	return trprox
+}
+
+func (ps *proxyState) replace(s *state) {
+	ps.st = s
+}
+
+func (ps *proxyState) state() *state {
+	return ps.st
+}
+
+func (ps *proxyState) String() string {
+	return fmt.Sprintf("<proxyState: %s>", ps.key)
+}
+
+type gen struct {
+	startpoint  string
+	follow      map[string]stringset
+	firstCache  map[string]stringset
+	productions map[string][]item
+	kernelMap   map[string]*state
+	closures    map[string][]item
+	states      []*state
+}
+
 func newGen(productions map[string][]string, startpoint string) *gen {
 	g := &gen{
 		startpoint,
@@ -178,7 +224,7 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 
 	for symname, cls := range g.productions {
 		g.closures[symname] = cls
-		stack := []string{symname}
+		stack := stringset{}.add(symname)
 		work := cls
 
 		for len(work) > 0 {
@@ -193,13 +239,13 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 
 			content := cur.content
 
-			if isTerminal(content) || inStack(content, stack) {
+			if isTerminal(content) || stack.contains(content) {
 				continue
 			}
 
 			g.closures[symname] = append(g.closures[symname], g.productions[content]...)
 			work = append(work, g.productions[content]...)
-			stack = append(stack, content)
+			stack.add(content)
 		}
 	}
 
@@ -332,17 +378,6 @@ func (g *gen) first(symname string, stack []string) stringset {
 	return set
 }
 
-func (st *state) transition(symname string) *proxyState {
-	trprox := st.trans[symname]
-
-	if trprox == nil {
-		trprox = newProxy(symname)
-		st.trans[symname] = trprox
-	}
-
-	return trprox
-}
-
 func (g *gen) constructState(proxy *proxyState) {
 	st := proxy.state()
 	key := kernelMapKey(st.kernel)
@@ -377,25 +412,6 @@ func (g *gen) constructState(proxy *proxyState) {
 	}
 }
 
-func (s *state) print(x int, builder *strings.Builder, stack []string) {
-	b := strings.Builder{}
-
-	for i := 0; i < x; i++ {
-		builder.WriteRune(' ')
-	}
-
-	stack = append(stack, kernelMapKey(s.kernel))
-	for k, v := range s.trans {
-		builder.WriteString(fmt.Sprintf("%s%s:\n", b.String(), k))
-
-		if inStack(kernelMapKey(v.state().kernel), stack) {
-			builder.WriteString(fmt.Sprintf("%s\trepeat\n", b.String()))
-		} else {
-			v.state().print(x+1, builder, stack)
-		}
-	}
-}
-
 func (g *gen) constructStates() {
 	for symname, kernel := range g.productions {
 		proxy := newProxy(symname)
@@ -412,41 +428,6 @@ func kernelMapKey(items []item) string {
 	}
 
 	return b.String()
-}
-
-func (i *item) String() string {
-	b := strings.Builder{}
-	b.WriteString(fmt.Sprintf("%s:", i.prodname))
-
-	for idx, sym := range i.symbols {
-		if idx == i.dotindex {
-			b.WriteRune('.')
-		}
-
-		b.WriteString(fmt.Sprintf("%s:%d", sym.content, sym.flag))
-	}
-
-	return b.String()
-}
-
-func (i *item) cur() (symbol, error) {
-	return i.at(i.dotindex)
-}
-
-func (i *item) at(index int) (symbol, error) {
-	if index >= len(i.symbols) {
-		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
-	}
-	return i.symbols[index], nil
-}
-
-func (i *item) advance() item {
-	// Returns a copy with position advanced by one
-	n := *i
-	//n.symbols[n.dotindex].content = terminal
-	n.dotindex++
-
-	return n
 }
 
 func TestFollow() interface{} {
@@ -472,6 +453,16 @@ func TestClosure() interface{} {
 	return 0
 }
 
+func (g *gen) findState(st *state) int {
+	for idx, x := range g.states {
+		if x == st {
+			return idx
+		}
+	}
+
+	return -1
+}
+
 func TestStates() interface{} {
 	g := newGen(metaprod, "$start")
 	g.constructStates()
@@ -485,8 +476,11 @@ func TestStates() interface{} {
 
 	builder := &strings.Builder{}
 
-	for _, s := range g.states {
-		s.print(1, builder, nil)
+	for idx, s := range g.states {
+		fmt.Println(idx)
+		for key, prox := range s.trans {
+			fmt.Printf("\t%s (%v): %s => State %d\n", prox.key, prox.state().kernel, key, g.findState(prox.state()))
+		}
 	}
 	fmt.Printf("%d states printed\n", len(g.states))
 

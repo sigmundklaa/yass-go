@@ -12,32 +12,28 @@ func (set stringset) slice() (slc []string) {
 	return
 }
 
-func (set stringset) add(items ...string) {
+func (set stringset) add(items ...string) stringset {
 	for _, item := range items {
 		set[item] = true
 	}
+
+	return set
 }
 
-func (set stringset) merge(sets ...stringset) {
+func (set stringset) merge(sets ...stringset) stringset {
 	for _, s := range sets {
 		set.add(s.slice()...)
 	}
+
+	return set
 }
 
-func (set stringset) delete(items ...string) {
+func (set stringset) delete(items ...string) stringset {
 	for _, item := range items {
 		delete(set, item)
 	}
-}
 
-func (set stringset) copy() stringset {
-	nw := make(stringset)
-
-	for k, v := range set {
-		nw[k] = v
-	}
-
-	return nw
+	return set
 }
 
 func (set stringset) String() string {
