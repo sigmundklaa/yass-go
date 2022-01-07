@@ -107,11 +107,12 @@ func (ps *proxyState) String() string {
 }
 
 type gen struct {
+	startpoint  string
 	follow      map[string]stringset
 	firstCache  map[string]stringset
 	productions map[string][]item
-	startpoint  string
 	kernelMap   map[string]*state
+	closures    map[string][]item
 }
 
 func isTerminal(symname string) bool {
@@ -150,11 +151,12 @@ func createRules(raw string) (rules []symbol) {
 
 func newGen(productions map[string][]string, startpoint string) *gen {
 	g := &gen{
+		startpoint,
 		make(map[string]stringset),
 		make(map[string]stringset),
 		make(map[string][]item),
-		startpoint,
 		make(map[string]*state),
+		make(map[string][]item),
 	}
 
 	for symname, union := range productions {
@@ -165,6 +167,33 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 		}
 
 		g.productions[symname] = prods
+	}
+
+	for symname, cls := range g.productions {
+		g.closures[symname] = cls
+		stack := []string{symname}
+		work := cls
+
+		for len(work) > 0 {
+			itm := work[0]
+			work = work[1:]
+
+			cur, err := itm.cur()
+
+			if err != nil {
+				continue
+			}
+
+			content := cur.content
+
+			if isTerminal(content) || inStack(content, stack) {
+				continue
+			}
+
+			g.closures[symname] = append(g.closures[symname], g.productions[content]...)
+			work = append(work, g.productions[content]...)
+			stack = append(stack, content)
+		}
 	}
 
 	g.constructAllFollows()
@@ -296,31 +325,15 @@ func (g *gen) first(symname string, stack []string) stringset {
 	return set
 }
 
-func (g *gen) closureFromItem(itm item, stack []string) []item {
-	cur, err := itm.cur()
+func (st *state) transition(symname string) *proxyState {
+	trprox := st.trans[symname]
 
-	if err != nil {
-		return nil
+	if trprox == nil {
+		trprox = newProxy(symname)
+		st.trans[symname] = trprox
 	}
 
-	content := cur.content
-
-	if isTerminal(content) || inStack(content, stack) {
-		return nil
-	}
-
-	return g.closure(content, stack)
-}
-
-func (g *gen) closure(symname string, stack []string) []item {
-	cls := g.productions[symname]
-	stack = append(stack, symname)
-
-	for _, itm := range cls {
-		cls = append(cls, g.closureFromItem(itm, stack)...)
-	}
-
-	return cls
+	return trprox
 }
 
 func (g *gen) constructState(proxy *proxyState) {
@@ -332,6 +345,9 @@ func (g *gen) constructState(proxy *proxyState) {
 		proxy.replace(existing)
 		return
 	}
+	fmt.Println(len(key))
+
+	//closures := g.closures[proxy.key]
 
 	for _, itm := range st.kernel {
 		cur, err := itm.cur()
@@ -340,25 +356,34 @@ func (g *gen) constructState(proxy *proxyState) {
 			continue
 		}
 
-		copy := itm.advance() // this needs to advance tho??!
+		advanced := itm.advance() // this needs to advance tho??!
 
-		for fterm := range g.first(cur.content, nil) {
-			trprox := st.trans[fterm]
+		trstate := st.transition(cur.content).state()
+		trstate.kernel = append(trstate.kernel, advanced)
 
-			if trprox == nil {
-				trprox = newProxy(fterm)
-				st.trans[fterm] = trprox
+		/*if !isTerminal(cur.content) {
+			for _, c := range closures {
+				if c.prodname != cur.content {
+					continue
+				}
+
+				clcur, err := itm.cur()
+
+				if err != nil {
+					continue
+				}
+
+				cltrstate := st.transition(clcur.content).state()
+				cltrstate.kernel = append(cltrstate.kernel, advanced)
 			}
-
-			trstate := trprox.state()
-			trstate.kernel = append(trstate.kernel, copy)
-		}
+		}*/
 	}
 
 	g.kernelMap[key] = st
 
-	for _, st := range st.trans {
-		g.constructState(st)
+	for _, ps := range st.trans {
+		fmt.Printf("%s\n", ps.String())
+		g.constructState(ps)
 	}
 }
 
@@ -382,7 +407,7 @@ func (s *state) print(x int) {
 
 func (g *gen) constructStateSymname(symname string) *state {
 	proxy := newProxy(symname)
-	proxy.state().kernel = g.closure(symname, nil)
+	proxy.state().kernel = g.closures[symname]
 	g.constructState(proxy)
 
 	return proxy.state() // We call state again as it may have changed after constructState
@@ -446,9 +471,9 @@ func TestFollow() interface{} {
 func TestClosure() interface{} {
 	g := newGen(metaprod, "$start")
 
-	for k, _ := range g.productions {
+	for k := range g.productions {
 		fmt.Printf("Closure for %s:\n", k)
-		for _, item := range g.closure(k, nil) {
+		for _, item := range g.closures[k] {
 			fmt.Printf("\t%s -> %v\n", item.prodname, item.symbols)
 		}
 	}
