@@ -2,6 +2,7 @@ package analyser
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -73,6 +74,10 @@ type symbol struct {
 	flag    prodFlag
 }
 
+var (
+	ENDSYMBOL = symbol{END, 0}
+)
+
 // name: symbol1 symbol2? symbol3+
 type item struct {
 	prodname string
@@ -113,6 +118,7 @@ type gen struct {
 	productions map[string][]item
 	kernelMap   map[string]*state
 	closures    map[string][]item
+	states      []*state
 }
 
 func isTerminal(symname string) bool {
@@ -157,6 +163,7 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 		make(map[string][]item),
 		make(map[string]*state),
 		make(map[string][]item),
+		nil,
 	}
 
 	for symname, union := range productions {
@@ -345,11 +352,11 @@ func (g *gen) constructState(proxy *proxyState) {
 		proxy.replace(existing)
 		return
 	}
-	fmt.Println(len(key))
 
-	//closures := g.closures[proxy.key]
+	closure := st.kernel
+	closure = append(closure, g.closures[proxy.key]...)
 
-	for _, itm := range st.kernel {
+	for _, itm := range closure {
 		cur, err := itm.cur()
 
 		if err != nil {
@@ -360,57 +367,41 @@ func (g *gen) constructState(proxy *proxyState) {
 
 		trstate := st.transition(cur.content).state()
 		trstate.kernel = append(trstate.kernel, advanced)
-
-		/*if !isTerminal(cur.content) {
-			for _, c := range closures {
-				if c.prodname != cur.content {
-					continue
-				}
-
-				clcur, err := itm.cur()
-
-				if err != nil {
-					continue
-				}
-
-				cltrstate := st.transition(clcur.content).state()
-				cltrstate.kernel = append(cltrstate.kernel, advanced)
-			}
-		}*/
 	}
 
 	g.kernelMap[key] = st
+	g.states = append(g.states, st)
 
 	for _, ps := range st.trans {
-		fmt.Printf("%s\n", ps.String())
 		g.constructState(ps)
 	}
 }
 
-func (s *state) print(x int) {
+func (s *state) print(x int, builder *strings.Builder, stack []string) {
 	b := strings.Builder{}
 
 	for i := 0; i < x; i++ {
-		b.WriteRune('\t')
+		builder.WriteRune(' ')
 	}
 
+	stack = append(stack, kernelMapKey(s.kernel))
 	for k, v := range s.trans {
-		fmt.Printf("%s%s:\n", b.String(), k)
+		builder.WriteString(fmt.Sprintf("%s%s:\n", b.String(), k))
 
-		if kernelMapKey(v.state().kernel) == kernelMapKey(s.kernel) {
-			fmt.Printf("%s\trepeat\n", b.String())
+		if inStack(kernelMapKey(v.state().kernel), stack) {
+			builder.WriteString(fmt.Sprintf("%s\trepeat\n", b.String()))
 		} else {
-			v.state().print(x + 1)
+			v.state().print(x+1, builder, stack)
 		}
 	}
 }
 
-func (g *gen) constructStateSymname(symname string) *state {
-	proxy := newProxy(symname)
-	proxy.state().kernel = g.closures[symname]
-	g.constructState(proxy)
-
-	return proxy.state() // We call state again as it may have changed after constructState
+func (g *gen) constructStates() {
+	for symname, kernel := range g.productions {
+		proxy := newProxy(symname)
+		proxy.state().kernel = kernel
+		g.constructState(proxy)
+	}
 }
 
 func kernelMapKey(items []item) string {
@@ -483,8 +474,23 @@ func TestClosure() interface{} {
 
 func TestStates() interface{} {
 	g := newGen(metaprod, "$start")
-	s := g.constructStateSymname("$expr")
+	g.constructStates()
 
-	s.print(1)
+	f, err := os.OpenFile("dump.githide.txt", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		panic(err)
+	}
+
+	defer f.Close()
+
+	builder := &strings.Builder{}
+
+	for _, s := range g.states {
+		s.print(1, builder, nil)
+	}
+	fmt.Printf("%d states printed\n", len(g.states))
+
+	f.WriteString(builder.String())
+
 	return 0
 }
