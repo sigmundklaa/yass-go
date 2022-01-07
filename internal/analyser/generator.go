@@ -154,6 +154,10 @@ func (i *item) cur() (symbol, error) {
 	return i.at(i.dotindex)
 }
 
+func (i *item) last() bool {
+	return i.dotindex >= len(i.symbols)
+}
+
 func (i *item) at(index int) (symbol, error) {
 	if index >= len(i.symbols) {
 		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
@@ -186,8 +190,9 @@ func prodString(prod []item) string {
 }
 
 type state struct {
-	kernel []item
-	trans  map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+	kernel   []item
+	complete stringset
+	trans    map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
 }
 
 type proxyState struct {
@@ -196,7 +201,7 @@ type proxyState struct {
 }
 
 func newProxy(key string) *proxyState {
-	return &proxyState{key, &state{nil, make(map[string]*proxyState)}}
+	return &proxyState{key, &state{nil, make(stringset), make(map[string]*proxyState)}}
 }
 
 func (st *state) transition(symname string) *proxyState {
@@ -227,8 +232,9 @@ type gen struct {
 	follow      map[string]stringset
 	firstCache  map[string]stringset
 	productions map[string][]item
-	kernelMap   map[string]*state
 	closures    map[string][]item
+	kernelMap   map[string]*state
+	baseStates  map[string]*state
 	states      []*state
 }
 
@@ -238,8 +244,9 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 		make(map[string]stringset),
 		make(map[string]stringset),
 		make(map[string][]item),
-		make(map[string]*state),
 		make(map[string][]item),
+		make(map[string]*state),
+		make(map[string]*state),
 		nil,
 	}
 
@@ -363,7 +370,7 @@ func (g *gen) first(sym symbol, stack stringset) stringset {
 		return cached
 	}
 
-	if sym.terminal {
+	if !sym.terminal {
 		for _, production := range g.productions[symname] {
 			// Union: One of all possible productions for "rule"
 			for i, cont := 0, true; i < len(production.symbols) && cont; i++ {
@@ -415,13 +422,7 @@ func (g *gen) constructState(proxy *proxyState) {
 		return
 	}
 
-	closure, ok := g.closures[proxy.key]
-
-	if !ok {
-		closure = st.kernel
-	}
-
-	for _, itm := range closure {
+	for _, itm := range st.kernel {
 		cur, err := itm.cur()
 
 		if err != nil {
@@ -429,6 +430,13 @@ func (g *gen) constructState(proxy *proxyState) {
 		}
 
 		advanced := itm.advance() // this needs to advance tho??!
+		last := advanced.last()
+
+		if last {
+			st.complete.add(cur.content)
+
+			continue
+		}
 
 		trstate := st.transition(cur.content).state()
 		trstate.kernel = append(trstate.kernel, advanced)
@@ -445,7 +453,9 @@ func (g *gen) constructState(proxy *proxyState) {
 func (g *gen) constructStates() {
 	for symname, kernel := range g.productions {
 		proxy := newProxy(symname)
-		proxy.state().kernel = kernel
+		pxstate := proxy.state()
+		pxstate.kernel = kernel
+		g.baseStates[symname] = pxstate
 		g.constructState(proxy)
 	}
 }
@@ -508,8 +518,21 @@ func TestStates() interface{} {
 
 	for idx, s := range g.states {
 		fmt.Fprintln(f, idx)
-		for key, prox := range s.trans {
-			fmt.Fprintf(f, "\t%s (%v): %s => State %d\n", prox.key, prodString(prox.state().kernel), key, g.findState(prox.state()))
+		//estate := false
+		/*
+			for _, kern := range s.kernel {
+				if kern.dotindex >= len(kern.symbols) {
+					estate = true
+					break
+				}
+			}*/
+
+		for _, prox := range s.trans {
+			fmt.Fprintf(f, "\t%s (%v) => State %d\n", prox.key, prodString(prox.state().kernel), g.findState(prox.state()))
+		}
+
+		for s := range s.complete {
+			fmt.Fprintf(f, "\t%s => END\n", s)
 		}
 	}
 	fmt.Printf("%d states printed\n", len(g.states))
