@@ -65,8 +65,9 @@ func (pf prodFlag) canRepeat() bool {
 var flagChars = []byte{'+', '*', '?'}
 
 type symbol struct {
-	content string
-	flag    prodFlag
+	content  string
+	terminal bool
+	flag     prodFlag
 }
 
 const (
@@ -75,12 +76,8 @@ const (
 )
 
 var (
-	ENDSYMBOL = symbol{END, 0}
+	ENDSYMBOL = symbol{END, true, 0}
 )
-
-func isTerminal(symname string) bool {
-	return symname[0] != '$'
-}
 
 func createRule(symname string) symbol {
 	var flag prodFlag
@@ -98,7 +95,7 @@ func createRule(symname string) symbol {
 		}()
 
 		if !cont {
-			return symbol{symname[:i+1], flag}
+			return symbol{symname[:i+1], symname[0] != '$', flag}
 		}
 	}
 
@@ -239,7 +236,7 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 
 			content := cur.content
 
-			if isTerminal(content) || stack.contains(content) {
+			if cur.terminal || stack.contains(content) {
 				continue
 			}
 
@@ -254,27 +251,17 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 	return g
 }
 
-func inStack(content string, stack []string) bool {
-	for _, s := range stack {
-		if s == content {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (g *gen) constructFollows(itm item) {
 	for i, length := 0, len(itm.symbols); i < length; i++ {
 		currentitm := itm.symbols[i]
 		current := currentitm.content
 
-		if isTerminal(current) {
+		if currentitm.terminal {
 			continue
 		}
 
 		if currentitm.flag.canRepeat() {
-			g.follow[current].merge(g.first(current, nil))
+			g.follow[current].merge(g.first(currentitm, nil))
 		}
 
 		for offset, cont := 1, true; cont; offset++ {
@@ -291,14 +278,14 @@ func (g *gen) constructFollows(itm item) {
 			nxtContent := nxtitm.content
 
 			// TODO: Fix +* operations
-			if isTerminal(nxtContent) {
+			if nxtitm.terminal {
 				g.follow[current].add(nxtContent)
 				break
 			} else if nxtitm.flag.hasEpsilon() {
 				g.follow[current] = g.follow[itm.prodname]
 				break
 			} else {
-				deriv := g.first(nxtContent, nil)
+				deriv := g.first(nxtitm, nil)
 
 				if deriv.contains(EPSILON) {
 					deriv.delete(EPSILON)
@@ -327,8 +314,14 @@ func (g *gen) constructAllFollows() {
 
 // Return possible terminals
 // Stack prevents infinite recursion
-func (g *gen) first(symname string, stack []string) stringset {
+func (g *gen) first(sym symbol, stack stringset) stringset {
+	symname := sym.content
 	set := make(stringset)
+
+	if stack == nil {
+		stack = make(stringset)
+	}
+
 	addToCache := len(stack) == 0
 	cached, ok := g.firstCache[symname]
 
@@ -336,7 +329,7 @@ func (g *gen) first(symname string, stack []string) stringset {
 		return cached
 	}
 
-	if !isTerminal(symname) {
+	if sym.terminal {
 		for _, production := range g.productions[symname] {
 			// Union: One of all possible productions for "rule"
 			for i, cont := 0, true; i < len(production.symbols) && cont; i++ {
@@ -345,9 +338,9 @@ func (g *gen) first(symname string, stack []string) stringset {
 				// resulting in FIRST(L) -> FIRST(A)
 				prodAt := production.symbols[i]
 
-				if content := prodAt.content; content != symname && !inStack(content, stack) {
-					stack := append(stack, symname)
-					deriv := g.first(content, stack)
+				if content := prodAt.content; content != symname && !stack.contains(content) {
+					stack.add(symname)
+					deriv := g.first(prodAt, stack)
 
 					// If an epsilon is encountered, we substitute current and keep iterating
 					if deriv.contains(EPSILON) {
@@ -437,7 +430,7 @@ func TestFollow() interface{} {
 		fmt.Printf("%s => %v\n", k, v)
 	}
 
-	return g.first("$opt_ext", nil)
+	return g.first(symbol{"$opt_ext", false, 0}, nil)
 }
 
 func TestClosure() interface{} {
