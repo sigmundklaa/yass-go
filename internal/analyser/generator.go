@@ -38,7 +38,7 @@ var metaprod = map[string][]string{
 		"$opt_ext",
 		"regex",
 		"string",
-		//"$expr+",
+		"$expr+",
 	},
 	"$opt_ext": {
 		"sqbrac_open $expr sqbrac_close",
@@ -68,6 +68,20 @@ type symbol struct {
 	content  string
 	terminal bool
 	flag     prodFlag
+}
+
+func (sym symbol) String() string {
+	str := sym.content
+
+	if sym.flag&PLUS != 0 {
+		return str + "+"
+	} else if sym.flag&STAR != 0 {
+		return str + "*"
+	} else if sym.flag&OPT != 0 {
+		return str + "?"
+	}
+
+	return str
 }
 
 const (
@@ -119,13 +133,18 @@ type item struct {
 func (i *item) String() string {
 	b := strings.Builder{}
 	b.WriteString(fmt.Sprintf("%s:", i.prodname))
+	last := len(i.symbols) - 1
 
 	for idx, sym := range i.symbols {
-		if idx == i.dotindex {
+		if idx == i.dotindex-1 {
 			b.WriteRune('.')
 		}
 
-		b.WriteString(fmt.Sprintf("%s:%d", sym.content, sym.flag))
+		b.WriteString(sym.String())
+
+		if idx != last {
+			b.WriteRune(' ')
+		}
 	}
 
 	return b.String()
@@ -149,6 +168,21 @@ func (i *item) advance() item {
 	n.dotindex++
 
 	return n
+}
+
+func prodString(prod []item) string {
+	b := strings.Builder{}
+	last := len(prod) - 1
+
+	for idx, sym := range prod {
+		b.WriteString(sym.String())
+
+		if idx != last {
+			b.WriteString("  |  ")
+		}
+	}
+
+	return b.String()
 }
 
 type state struct {
@@ -381,8 +415,11 @@ func (g *gen) constructState(proxy *proxyState) {
 		return
 	}
 
-	closure := st.kernel
-	closure = append(closure, g.closures[proxy.key]...)
+	closure, ok := g.closures[proxy.key]
+
+	if !ok {
+		closure = st.kernel
+	}
 
 	for _, itm := range closure {
 		cur, err := itm.cur()
@@ -467,17 +504,17 @@ func TestStates() interface{} {
 
 	defer f.Close()
 
-	builder := &strings.Builder{}
+	//builder := &strings.Builder{}
 
 	for idx, s := range g.states {
-		fmt.Println(idx)
+		fmt.Fprintln(f, idx)
 		for key, prox := range s.trans {
-			fmt.Printf("\t%s (%v): %s => State %d\n", prox.key, prox.state().kernel, key, g.findState(prox.state()))
+			fmt.Fprintf(f, "\t%s (%v): %s => State %d\n", prox.key, prodString(prox.state().kernel), key, g.findState(prox.state()))
 		}
 	}
 	fmt.Printf("%d states printed\n", len(g.states))
 
-	f.WriteString(builder.String())
+	//f.WriteString(builder.String())
 
 	return 0
 }
