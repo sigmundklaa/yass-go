@@ -1,4 +1,4 @@
-## Yet Another SQF Superscript
+# Yass - Yet Another SQF Superscript
 
 The Real Virtuality game engine, which serves as the backbone for majority of Bohemia Interactive games, gives 3rd party
 developers the ability to mod the games through the scripting language SQF. The majority of the success of the Arma series can be attributed to its moddability, and it is a crucical aspect of the game.
