@@ -84,6 +84,20 @@ func (sym symbol) String() string {
 	return str
 }
 
+func symsEqual(x []symbol, y []symbol) bool {
+	if len(x) != len(y) {
+		return false
+	}
+
+	for idx, s := range x {
+		if s != y[idx] {
+			return false
+		}
+	}
+
+	return true
+}
+
 const (
 	EPSILON = `\epsilon`
 	END     = `\end`
@@ -154,8 +168,20 @@ func (i *item) cur() (symbol, error) {
 	return i.at(i.dotindex)
 }
 
-func (i *item) last() bool {
-	return i.dotindex >= len(i.symbols)
+func (i *item) equal(other *item) bool {
+	return i.prodname == other.prodname &&
+		i.dotindex == other.dotindex &&
+		symsEqual(i.symbols, other.symbols)
+}
+
+func (i *item) in(slc []item) bool {
+	for _, x := range slc {
+		if x.equal(i) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (i *item) at(index int) (symbol, error) {
@@ -172,6 +198,22 @@ func (i *item) advance() item {
 	n.dotindex++
 
 	return n
+}
+
+func uniqueItemSet(set []item) []item {
+	newset := []item{}
+
+	if set == nil {
+		return nil
+	}
+
+	for _, itm := range set {
+		if !itm.in(newset) {
+			newset = append(newset, itm)
+		}
+	}
+
+	return newset
 }
 
 func prodString(prod []item) string {
@@ -422,6 +464,8 @@ func (g *gen) constructState(proxy *proxyState) {
 		return
 	}
 
+	//work := st.kernel
+
 	for _, itm := range st.kernel {
 		cur, err := itm.cur()
 
@@ -429,17 +473,24 @@ func (g *gen) constructState(proxy *proxyState) {
 			continue
 		}
 
-		advanced := itm.advance() // this needs to advance tho??!
-		last := advanced.last()
-
-		if last {
-			st.complete.add(cur.content)
-
-			continue
-		}
-
 		trstate := st.transition(cur.content).state()
-		trstate.kernel = append(trstate.kernel, advanced)
+		trstate.kernel = append(trstate.kernel, itm.advance())
+
+		if !cur.terminal {
+			//work = append(work, g.closures[cur.content]...)
+			closures := g.closures[cur.content]
+
+			for _, cloc := range closures {
+				cloccur, err := cloc.cur()
+
+				if err != nil {
+					panic(err)
+				}
+
+				cloctrstate := st.transition(cloccur.content).state()
+				cloctrstate.kernel = uniqueItemSet(append(cloctrstate.kernel, cloc.advance()))
+			}
+		}
 	}
 
 	g.kernelMap[key] = st
