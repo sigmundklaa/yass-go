@@ -454,6 +454,24 @@ func (g *gen) first(sym symbol, stack stringset) stringset {
 	return set
 }
 
+func (g *gen) processTransitions(st *state, set []item, extend bool) {
+	for _, itm := range set {
+		cur, err := itm.cur()
+
+		if err != nil {
+			continue
+		}
+
+		trstate := st.transition(cur.content).state()
+		trstate.kernel = uniqueItemSet(append(trstate.kernel, itm.advance()))
+
+		if extend && !cur.terminal {
+			// Process transitions for the closures
+			g.processTransitions(st, g.closures[cur.content], false)
+		}
+	}
+}
+
 func (g *gen) constructState(proxy *proxyState) {
 	st := proxy.state()
 	key := kernelMapKey(st.kernel)
@@ -464,34 +482,7 @@ func (g *gen) constructState(proxy *proxyState) {
 		return
 	}
 
-	//work := st.kernel
-
-	for _, itm := range st.kernel {
-		cur, err := itm.cur()
-
-		if err != nil {
-			continue
-		}
-
-		trstate := st.transition(cur.content).state()
-		trstate.kernel = append(trstate.kernel, itm.advance())
-
-		if !cur.terminal {
-			//work = append(work, g.closures[cur.content]...)
-			closures := g.closures[cur.content]
-
-			for _, cloc := range closures {
-				cloccur, err := cloc.cur()
-
-				if err != nil {
-					panic(err)
-				}
-
-				cloctrstate := st.transition(cloccur.content).state()
-				cloctrstate.kernel = uniqueItemSet(append(cloctrstate.kernel, cloc.advance()))
-			}
-		}
-	}
+	g.processTransitions(st, st.kernel, true)
 
 	g.kernelMap[key] = st
 	g.states = append(g.states, st)
