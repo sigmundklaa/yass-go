@@ -506,7 +506,7 @@ func kernelMapKey(items []item) string {
 	b := strings.Builder{}
 
 	for _, i := range items {
-		b.WriteString(fmt.Sprintf("%s|", i.String()))
+		fmt.Fprintf(&b, "%s|", i.String())
 	}
 
 	return b.String()
