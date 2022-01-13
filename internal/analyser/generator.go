@@ -138,13 +138,13 @@ func createRules(raw string) (rules []symbol) {
 }
 
 // name: symbol1 symbol2? symbol3+
-type item struct {
+type lr0Item struct {
 	prodname string
 	dotindex int
 	symbols  []symbol
 }
 
-func (i *item) String() string {
+func (i *lr0Item) String() string {
 	b := strings.Builder{}
 	b.WriteString(fmt.Sprintf("%s:", i.prodname))
 	last := len(i.symbols) - 1
@@ -164,17 +164,17 @@ func (i *item) String() string {
 	return b.String()
 }
 
-func (i *item) cur() (symbol, error) {
+func (i *lr0Item) cur() (symbol, error) {
 	return i.at(i.dotindex)
 }
 
-func (i *item) equal(other *item) bool {
+func (i *lr0Item) equal(other *lr0Item) bool {
 	return i.prodname == other.prodname &&
 		i.dotindex == other.dotindex &&
 		symsEqual(i.symbols, other.symbols)
 }
 
-func (i *item) in(slc []item) bool {
+func (i *lr0Item) in(slc []lr0Item) bool {
 	for _, x := range slc {
 		if x.equal(i) {
 			return true
@@ -184,14 +184,14 @@ func (i *item) in(slc []item) bool {
 	return false
 }
 
-func (i *item) at(index int) (symbol, error) {
+func (i *lr0Item) at(index int) (symbol, error) {
 	if index >= len(i.symbols) {
 		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
 	}
 	return i.symbols[index], nil
 }
 
-func (i *item) advance() item {
+func (i *lr0Item) advance() lr0Item {
 	// Returns a copy with position advanced by one
 	n := *i
 	//n.symbols[n.dotindex].content = terminal
@@ -200,8 +200,8 @@ func (i *item) advance() item {
 	return n
 }
 
-func uniqueItemSet(set []item) []item {
-	newset := []item{}
+func uniqueItemSet(set []lr0Item) []lr0Item {
+	newset := []lr0Item{}
 
 	if set == nil {
 		return nil
@@ -216,7 +216,7 @@ func uniqueItemSet(set []item) []item {
 	return newset
 }
 
-func prodString(prod []item) string {
+func prodString(prod []lr0Item) string {
 	b := strings.Builder{}
 	last := len(prod) - 1
 
@@ -231,8 +231,13 @@ func prodString(prod []item) string {
 	return b.String()
 }
 
+type lalrItem struct {
+	lookahead stringset
+	lr0Item
+}
+
 type state struct {
-	kernel   []item
+	kernel   []lr0Item
 	complete stringset
 	trans    map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
 }
@@ -273,8 +278,8 @@ type gen struct {
 	startpoint  string
 	follow      map[string]stringset
 	firstCache  map[string]stringset
-	productions map[string][]item
-	closures    map[string][]item
+	productions map[string][]lr0Item
+	closures    map[string][]lr0Item
 	kernelMap   map[string]*state
 	baseStates  map[string]*state
 	states      []*state
@@ -285,18 +290,18 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 		startpoint,
 		make(map[string]stringset),
 		make(map[string]stringset),
-		make(map[string][]item),
-		make(map[string][]item),
+		make(map[string][]lr0Item),
+		make(map[string][]lr0Item),
 		make(map[string]*state),
 		make(map[string]*state),
 		nil,
 	}
 
 	for symname, union := range productions {
-		prods := []item{}
+		prods := []lr0Item{}
 
 		for _, u := range union {
-			prods = append(prods, item{symname, 0, createRules(u)})
+			prods = append(prods, lr0Item{symname, 0, createRules(u)})
 		}
 
 		g.productions[symname] = prods
@@ -334,7 +339,7 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 	return g
 }
 
-func (g *gen) constructFollows(itm item) {
+func (g *gen) constructFollows(itm lr0Item) {
 	for i, length := 0, len(itm.symbols); i < length; i++ {
 		currentitm := itm.symbols[i]
 		current := currentitm.content
@@ -454,7 +459,7 @@ func (g *gen) first(sym symbol, stack stringset) stringset {
 	return set
 }
 
-func (g *gen) processTransitions(st *state, set []item, extend bool) {
+func (g *gen) processTransitions(st *state, set []lr0Item, extend bool) {
 	for _, itm := range set {
 		cur, err := itm.cur()
 
@@ -502,7 +507,7 @@ func (g *gen) constructStates() {
 	}
 }
 
-func kernelMapKey(items []item) string {
+func kernelMapKey(items []lr0Item) string {
 	b := strings.Builder{}
 
 	for _, i := range items {
