@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/SigJig/yass-go/internal/analyser"
 	"github.com/SigJig/yass-go/internal/lexer"
 )
 
 func testLex() {
-	pattern := lexer.CompilePattern(analyser.Metapattern)
+	pattern := lexer.DefaultPattern()
 	f, err := os.Open("internal/analyser/grammar")
 
 	if err != nil {
@@ -41,7 +40,7 @@ func testLex() {
 }
 
 func testParse() {
-	fmt.Println(analyser.TestStates())
+	//fmt.Println(analyser.TestStates())
 }
 
 func main() {
