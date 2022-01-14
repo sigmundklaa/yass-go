@@ -2,10 +2,24 @@ package analyser
 
 import "fmt"
 
+type ActionKind int
+
+const (
+	SHIFT ActionKind = iota
+	REDUCE
+	GOTO
+)
+
+type Action struct {
+	kind ActionKind
+	st   *state
+}
+
 type state struct {
 	kernel   []lalrItem
 	complete stringset
 	trans    map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
+	table    map[string]Action
 }
 
 type proxyState struct {
@@ -20,6 +34,7 @@ func newProxy(key string) *proxyState {
 			kernel:   nil,
 			complete: make(stringset),
 			trans:    make(map[string]*proxyState),
+			table:    make(map[string]Action),
 		},
 	}
 }
