@@ -66,16 +66,29 @@ var (
 	ENDSYMBOL = symbol{END, true, 0}
 )
 
-// name: symbol1 symbol2? symbol3+
-type lr0Item struct {
-	prodname string
-	dotindex int
-	symbols  []symbol
+type production struct {
+	name    string
+	symbols []symbol
 }
 
-func (i *lr0Item) String() string {
+func (prod *production) lalr(follow stringset) lalrItem {
+	return lalrItem{
+		dotindex:   0,
+		lookaheads: follow,
+		production: *prod,
+	}
+}
+
+// name: symbol1 symbol2? symbol3+
+type lalrItem struct {
+	dotindex   int
+	lookaheads stringset
+	production
+}
+
+func (i *lalrItem) String() string {
 	b := strings.Builder{}
-	fmt.Fprintf(&b, "%s:", i.prodname)
+	fmt.Fprintf(&b, "%s:", i.name)
 	last := len(i.symbols) - 1
 
 	for idx, sym := range i.symbols {
@@ -93,34 +106,24 @@ func (i *lr0Item) String() string {
 	return b.String()
 }
 
-func (i *lr0Item) cur() (symbol, error) {
+func (i *lalrItem) cur() (symbol, error) {
 	return i.at(i.dotindex)
 }
 
-func (i *lr0Item) equal(other *lr0Item) bool {
-	return i.prodname == other.prodname &&
+func (i *lalrItem) equal(other lalrItem) bool {
+	return i.name == other.name &&
 		i.dotindex == other.dotindex &&
 		symsEqual(i.symbols, other.symbols)
 }
 
-func (i *lr0Item) in(slc []lr0Item) bool {
-	for _, x := range slc {
-		if x.equal(i) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (i *lr0Item) at(index int) (symbol, error) {
+func (i *lalrItem) at(index int) (symbol, error) {
 	if index >= len(i.symbols) {
 		return symbol{}, fmt.Errorf("index error: attempted to access symbol %d, only %d available", index, len(i.symbols))
 	}
 	return i.symbols[index], nil
 }
 
-func (i *lr0Item) advance() lr0Item {
+func (i *lalrItem) advance() lalrItem {
 	// Returns a copy with position advanced by one
 	n := *i
 	//n.symbols[n.dotindex].content = terminal
@@ -129,27 +132,7 @@ func (i *lr0Item) advance() lr0Item {
 	return n
 }
 
-func (i *lr0Item) lalr(follow stringset) lalrItem {
-	return lalrItem{follow, *i}
-}
-
-func uniqueItemSet(set []lr0Item) []lr0Item {
-	newset := []lr0Item{}
-
-	if set == nil {
-		return nil
-	}
-
-	for _, itm := range set {
-		if !itm.in(newset) {
-			newset = append(newset, itm)
-		}
-	}
-
-	return newset
-}
-
-func prodString(prod []lr0Item) string {
+func prodString(prod []lalrItem) string {
 	b := strings.Builder{}
 	last := len(prod) - 1
 
@@ -164,7 +147,15 @@ func prodString(prod []lr0Item) string {
 	return b.String()
 }
 
-type lalrItem struct {
-	lookahead stringset
-	lr0Item
+func lalrMerge(kernel []lalrItem, add lalrItem) []lalrItem {
+	for idx, itm := range kernel {
+		if itm.equal(add) {
+			kernel[idx].lookaheads.merge(add.lookaheads)
+			return kernel
+		}
+	}
+
+	kernel = append(kernel, add)
+
+	return kernel
 }

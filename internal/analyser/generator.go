@@ -9,8 +9,8 @@ type gen struct {
 	startpoint  string
 	follow      map[string]stringset
 	firstCache  map[string]stringset
-	productions map[string][]lr0Item
-	closures    map[string][]lr0Item
+	productions map[string][]production
+	closures    map[string][]production
 	kernelMap   map[string]*state
 	baseStates  map[string]*state
 	states      []*state
@@ -18,21 +18,21 @@ type gen struct {
 
 func newGen(productions map[string][]string, startpoint string) *gen {
 	g := &gen{
-		startpoint,
-		make(map[string]stringset),
-		make(map[string]stringset),
-		make(map[string][]lr0Item),
-		make(map[string][]lr0Item),
-		make(map[string]*state),
-		make(map[string]*state),
-		nil,
+		startpoint:  startpoint,
+		follow:      make(map[string]stringset),
+		firstCache:  make(map[string]stringset),
+		productions: make(map[string][]production),
+		closures:    make(map[string][]production),
+		kernelMap:   make(map[string]*state),
+		baseStates:  make(map[string]*state),
+		states:      nil,
 	}
 
 	for symname, union := range productions {
-		prods := []lr0Item{}
+		prods := []production{}
 
 		for _, u := range union {
-			prods = append(prods, lr0Item{symname, 0, createMetaRules(u)})
+			prods = append(prods, production{symname, createMetaRules(u)})
 		}
 
 		g.productions[symname] = prods
@@ -47,11 +47,11 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 			itm := work[0]
 			work = work[1:]
 
-			cur, err := itm.cur()
-
-			if err != nil {
+			if len(itm.symbols) == 0 {
 				continue
 			}
+
+			cur := itm.symbols[0]
 
 			content := cur.content
 
@@ -66,11 +66,12 @@ func newGen(productions map[string][]string, startpoint string) *gen {
 	}
 
 	g.constructAllFollows()
+	g.constructStates()
 
 	return g
 }
 
-func (g *gen) constructFollows(itm lr0Item) {
+func (g *gen) constructFollows(itm production) {
 	for i, length := 0, len(itm.symbols); i < length; i++ {
 		currentitm := itm.symbols[i]
 		current := currentitm.content
@@ -87,7 +88,7 @@ func (g *gen) constructFollows(itm lr0Item) {
 			if i+offset >= length {
 				// TODO: This does not work in multilpe cases
 				// May need a custom structure that holds a reference to all the maps
-				g.follow[current] = g.follow[itm.prodname]
+				g.follow[current] = g.follow[itm.name]
 				break
 			}
 
@@ -101,7 +102,7 @@ func (g *gen) constructFollows(itm lr0Item) {
 				g.follow[current].add(nxtContent)
 				break
 			} else if nxtitm.flag.hasEpsilon() {
-				g.follow[current] = g.follow[itm.prodname]
+				g.follow[current] = g.follow[itm.name]
 				break
 			} else {
 				deriv := g.first(nxtitm, nil)
@@ -190,7 +191,7 @@ func (g *gen) first(sym symbol, stack stringset) stringset {
 	return set
 }
 
-func (g *gen) processTransitions(st *state, set []lr0Item, extend bool) {
+func (g *gen) processTransitions(st *state, set []lalrItem, extend bool) {
 	for _, itm := range set {
 		cur, err := itm.cur()
 
@@ -199,11 +200,17 @@ func (g *gen) processTransitions(st *state, set []lr0Item, extend bool) {
 		}
 
 		trstate := st.transition(cur.content).state()
-		trstate.kernel = uniqueItemSet(append(trstate.kernel, itm.advance()))
+		trstate.kernel = lalrMerge(trstate.kernel, itm.advance())
 
 		if extend && !cur.terminal {
 			// Process transitions for the closures
-			g.processTransitions(st, g.closures[cur.content], false)
+			closures := []lalrItem{}
+
+			for _, c := range g.closures[cur.content] {
+				closures = append(closures, c.lalr(stringset{}))
+			}
+
+			g.processTransitions(st, closures, false)
 		}
 	}
 }
@@ -232,13 +239,16 @@ func (g *gen) constructStates() {
 	for symname, kernel := range g.productions {
 		proxy := newProxy(symname)
 		pxstate := proxy.state()
-		pxstate.kernel = kernel
+		for _, itm := range kernel {
+			pxstate.kernel = append(pxstate.kernel, itm.lalr(stringset{}))
+		}
+
 		g.baseStates[symname] = pxstate
 		g.constructState(proxy)
 	}
 }
 
-func kernelMapKey(items []lr0Item) string {
+func kernelMapKey(items []lalrItem) string {
 	b := strings.Builder{}
 
 	for _, i := range items {

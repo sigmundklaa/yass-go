@@ -21,7 +21,7 @@ func TestClosure() interface{} {
 	for k := range g.productions {
 		fmt.Printf("Closure for %s:\n", k)
 		for _, item := range g.closures[k] {
-			fmt.Printf("\t%s -> %v\n", item.prodname, item.symbols)
+			fmt.Printf("\t%s -> %v\n", item.name, item.symbols)
 		}
 	}
 

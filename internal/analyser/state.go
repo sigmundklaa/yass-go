@@ -3,7 +3,7 @@ package analyser
 import "fmt"
 
 type state struct {
-	kernel   []lr0Item
+	kernel   []lalrItem
 	complete stringset
 	trans    map[string]*proxyState // Double pointer, so we can change the pointer after assignment to another state with an equal kernel
 }
@@ -14,7 +14,14 @@ type proxyState struct {
 }
 
 func newProxy(key string) *proxyState {
-	return &proxyState{key, &state{nil, make(stringset), make(map[string]*proxyState)}}
+	return &proxyState{
+		key: key,
+		st: &state{
+			kernel:   nil,
+			complete: make(stringset),
+			trans:    make(map[string]*proxyState),
+		},
+	}
 }
 
 func (st *state) transition(symname string) *proxyState {
