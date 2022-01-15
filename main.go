@@ -10,7 +10,7 @@ import (
 
 func testLex() {
 	pattern := lexer.DefaultPattern()
-	f, err := os.Open("internal/analyser/grammar")
+	f, err := os.Open("examples.githide/api/api.yass")
 
 	if err != nil {
 		panic(err)
@@ -19,24 +19,23 @@ func testLex() {
 
 	reader := bufio.NewReader(f)
 	lexer := lexer.NewLexer(reader, pattern, -1)
-	ch, ech := lexer.Stream(-1)
 
-	for {
-		select {
-		case tok, ok := <-ch:
-			if !ok {
-				return
-			}
-
-			if tok.Kind != "ignore" {
-				fmt.Println(tok)
-			}
-		case err := <-ech:
-			fmt.Println(err)
-
-			return
+	for tok, err := lexer.NextToken(); ; tok, err = lexer.NextToken() {
+		if err != nil {
+			panic(err)
 		}
+
+		if tok.Kind == "EOF" {
+			break
+		}
+
+		if tok.Kind == "space_no_nl" {
+			continue
+		}
+
+		fmt.Println(tok)
 	}
+
 }
 
 func testParse() {
@@ -44,5 +43,5 @@ func testParse() {
 }
 
 func main() {
-	testParse()
+	testLex()
 }

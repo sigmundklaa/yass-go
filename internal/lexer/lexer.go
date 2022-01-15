@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	DEFAULT_CHANBUF_SIZE = 0
-	DEFAULT_RUNEBUF_SIZE = 100
+	DEFAULT_RUNEBUF_SIZE = 10000
 )
 
 type Token struct {
@@ -56,39 +55,6 @@ func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer 
 	return l
 }
 
-func (l *Lexer) Stream(bufSize int) (chan *Token, chan error) {
-	if l.channel != nil {
-		panic(l.errf("attempted to initialize stream, already initialized"))
-	}
-
-	if bufSize < 0 {
-		bufSize = DEFAULT_CHANBUF_SIZE
-	}
-
-	l.channel = make(chan *Token, bufSize)
-	errchan := make(chan error)
-
-	go func() {
-		for {
-			tok, err := l.nextToken()
-
-			if err != nil {
-				if err != io.EOF {
-					errchan <- err
-				}
-
-				close(l.channel)
-				close(errchan)
-				return
-			}
-
-			l.channel <- tok
-		}
-	}()
-
-	return l.channel, errchan
-}
-
 func (l *Lexer) fillBuf(length uint) error {
 	if l.eof {
 		return nil
@@ -131,10 +97,14 @@ func (l *Lexer) shiftBuf(length uint) error {
 	return l.fillBuf(length)
 }
 
-func (l *Lexer) nextToken() (*Token, error) {
+func (l *Lexer) NextToken() (*Token, error) {
 	lexeme, key, err := l.nextLexeme()
 
 	if err != nil {
+		if err == io.EOF {
+			return l.createToken("EOF", nil)
+		}
+
 		return nil, err
 	}
 
@@ -173,7 +143,7 @@ func (l *Lexer) nextLexeme() ([]rune, string, error) {
 		panic(l.errf("unnamed submatch found at: %s", matches[0]))
 	}
 
-	return nil, "", l.errf("unable to process character at: %#v", string(sub))
+	return nil, "", l.errf("unrecognized character(s) at: %#v", string(sub[:5]))
 }
 
 func (l *Lexer) advanceWith(tok *Token) {

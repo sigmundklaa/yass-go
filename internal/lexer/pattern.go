@@ -18,13 +18,13 @@ var defaultPattern = map[string]string{
 	"curl_close":   "\\}",
 	"newline":      "\n+",
 	"space_no_nl":  `(?:[^\S\r\n]+)`,
-	"comment_ml":   `(?:/\*(?:[^\*]|\*[^/])*(?:\*/|$))`,
+	"comment_ml":   `(?:\/\*(?:[^\*]|\*[^\/])*(?:\*\/|$))`,
 	"comment_sl":   `(?://[^\n]*\n)`,
 }
 
 func CompilePattern(pattern map[string]string) *regexp.Regexp {
 	var builder strings.Builder
-	builder.WriteString("^(?:")
+	builder.WriteString("^(?m)(?:")
 	addOr := false
 
 	for name, pattern := range pattern {
