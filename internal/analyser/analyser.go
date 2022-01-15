@@ -83,12 +83,12 @@ func (an *Analyser) advance() (*Token, error) {
 
 	if token.Kind == "EOF" {
 		an.eof = true
-	}
+	} else {
+		an.lookahead, err = an.nextValidToken()
 
-	an.lookahead, err = an.nextValidToken()
-
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return token, nil
