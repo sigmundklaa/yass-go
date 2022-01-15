@@ -26,8 +26,8 @@ func isIgnoreKind(tok *Token) bool {
 }
 
 type Ast struct {
-	Kind string
-	Data []*Token
+	Kind     string
+	Children []*Token
 }
 
 type Analyser struct {
@@ -126,7 +126,7 @@ func (an *Analyser) parseModuleDec(tok *Token) *Ast {
 	name := an.mustAdvanceExpect("name")
 	an.mustAdvanceExpect("semicolon", "newline")
 
-	return &Ast{Kind: "module_dec", Data: []*Token{name}}
+	return &Ast{Kind: "module_dec", Children: []*Token{name}}
 }
 
 func (an *Analyser) Parse() *Ast {
