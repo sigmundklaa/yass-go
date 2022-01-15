@@ -1,10 +1,53 @@
-package lexer
+package analyser
 
 import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
+
+	"github.com/SigJig/yass-go/internal/errhandler"
 )
+
+// TODO: Convert strings to numbered constants
+var defaultPattern = map[string]string{
+	"name":         `[a-zA-Z_]\w*`,
+	"semicolon":    ";",
+	"assign":       "=",
+	"string":       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
+	"sqbrac_open":  "\\[",
+	"sqbrac_close": "\\]",
+	"paran_open":   "\\(",
+	"paran_close":  "\\)",
+	"curl_open":    "\\{",
+	"curl_close":   "\\}",
+	"newline":      "\n+",
+	"space_no_nl":  `(?:[^\S\r\n]+)`,
+	"comment_ml":   `(?:\/\*(?:[^\*]|\*[^\/])*(?:\*\/|$))`,
+	"comment_sl":   `(?://[^\n]*\n)`,
+}
+
+func CompilePattern(pattern map[string]string) *regexp.Regexp {
+	var builder strings.Builder
+	builder.WriteString("^(?m)(?:")
+	addOr := false
+
+	for name, pattern := range pattern {
+		if addOr {
+			builder.WriteRune('|')
+		} else {
+			addOr = true
+		}
+		fmt.Fprintf(&builder, "(?P<%s>%s)", name, pattern)
+	}
+	builder.WriteRune(')')
+
+	return regexp.MustCompile(builder.String())
+}
+
+func DefaultPattern() *regexp.Regexp {
+	return CompilePattern(defaultPattern)
+}
 
 const (
 	DEFAULT_RUNEBUF_SIZE = 10000
@@ -108,7 +151,7 @@ func (l *Lexer) NextToken() (*Token, error) {
 		return nil, err
 	}
 
-	tok, err := l.createToken(key, []rune(lexeme))
+	tok, err := l.createToken(key, lexeme)
 
 	if err != nil {
 		panic(err)
@@ -162,7 +205,7 @@ func (l *Lexer) advanceWith(tok *Token) {
 }
 
 func (l *Lexer) errf(fmtstr string, args ...interface{}) error {
-	return fmt.Errorf("lexer error at line %d, column %d: %s", l.line, l.col, fmt.Sprintf(fmtstr, args...))
+	return errhandler.Err("lexer", fmt.Sprintf(fmtstr, args...), l.line, l.col)
 }
 
 func (l *Lexer) createToken(kind string, lexeme []rune) (*Token, error) {

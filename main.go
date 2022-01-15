@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/SigJig/yass-go/internal/lexer"
+	"github.com/SigJig/yass-go/internal/analyser"
 )
 
 func testLex() {
-	pattern := lexer.DefaultPattern()
+	pattern := analyser.DefaultPattern()
 	f, err := os.Open("examples.githide/api/api.yass")
 
 	if err != nil {
@@ -18,7 +18,7 @@ func testLex() {
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
-	lexer := lexer.NewLexer(reader, pattern, -1)
+	lexer := analyser.NewLexer(reader, pattern, -1)
 
 	for tok, err := lexer.NextToken(); ; tok, err = lexer.NextToken() {
 		if err != nil {
