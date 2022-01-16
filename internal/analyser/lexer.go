@@ -14,6 +14,7 @@ var defaultPattern = map[string]string{
 	"name":         `[a-zA-Z_]\w*`,
 	"semicolon":    ";",
 	"assign":       "=",
+	"comma":        ",",
 	"string":       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
 	"sqbrac_open":  "\\[",
 	"sqbrac_close": "\\]",

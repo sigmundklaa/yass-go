@@ -15,6 +15,10 @@ var ignoreKinds = stringset{}.add(
 
 var keywords = stringset{}.add(
 	"module",
+	"class",
+	"for",
+	"if",
+	"else",
 )
 
 func isKeyWord(word string) bool {
@@ -45,8 +49,12 @@ func (an *Analyser) errf(tok *Token, format string, args ...interface{}) error {
 	return errhandler.Err("analyser", fmt.Sprintf(format, args...), tok.Line, tok.Col)
 }
 
-func (an *Analyser) errUnexpected(expected string, got *Token) error {
-	return an.errf(got, "unexpected token: expected (%s), got: %s", expected, string(got.Lexeme))
+func (an *Analyser) errUnexpectedKind(expected string, got *Token) error {
+	return an.errf(got, "unexpected token type: expected (%s), got: %s", expected, string(got.Kind))
+}
+
+func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
+	return an.errf(got, "unexpected token value: expected (%s), got: %s", expected, string(got.Lexeme))
 }
 
 func (an *Analyser) nextValidToken() (nxt *Token, err error) {
@@ -107,7 +115,7 @@ func (an *Analyser) mustAdvanceExpect(kinds ...string) *Token {
 		}
 	}
 
-	panic(an.errUnexpected(strings.Join(kinds, ","), tok))
+	panic(an.errUnexpectedKind(strings.Join(kinds, ","), tok))
 }
 
 func (an *Analyser) lookaheadIs(kinds ...string) bool {
@@ -122,11 +130,66 @@ func (an *Analyser) lookaheadIs(kinds ...string) bool {
 	return false
 }
 
+func (an *Analyser) parseSequence(closerKind, seperator string, allowedTypes ...string) []*Token {
+	toks := []*Token{}
+	allowedTypes = append(allowedTypes, closerKind)
+
+	for {
+		nxt := an.mustAdvanceExpect(allowedTypes...)
+
+		if nxt.Kind == closerKind {
+			break
+		}
+
+		toks = append(toks, nxt)
+
+		sep := an.mustAdvanceExpect(seperator, closerKind)
+
+		if sep.Kind == closerKind {
+			break
+		}
+	}
+
+	return toks
+}
+
 func (an *Analyser) parseModuleDec(tok *Token) *Ast {
 	name := an.mustAdvanceExpect("name")
 	an.mustAdvanceExpect("semicolon", "newline")
 
 	return &Ast{Kind: "module_dec", Children: []*Token{name}}
+}
+
+// classDef: "class" name ["(" inherits ("," inherits)* [","] ")"] "{" body "}"
+// on inherit, returns Kind = "class_def_inherit", otherwise "class_def_noinherit"
+// on inherits returns
+func (an *Analyser) parseClassDef(tok *Token) *Ast {
+	name := an.mustAdvanceExpect("name")
+	nxt := an.mustAdvanceExpect("paran_open", "curl_open")
+	ast := &Ast{Kind: "class_def_noinherit", Children: []*Token{name}}
+
+	if nxt.Kind == "paran_open" {
+		// Inherits
+		ast.Kind = "class_def_inherit"
+		ast.Children = append(ast.Children, an.parseSequence("paran_close", "comma", "name")...)
+
+		an.mustAdvanceExpect("curl_open")
+	}
+
+	an.stack = append(an.stack, "curl_close")
+
+	return ast
+}
+
+func (an *Analyser) parseKeyword(tok *Token) *Ast {
+	switch string(tok.Lexeme) {
+	case "module":
+		return an.parseModuleDec(tok)
+	case "class":
+		return an.parseClassDef(tok)
+	}
+
+	panic(an.errUnexpectedLexeme("keyword", tok))
 }
 
 func (an *Analyser) Parse() *Ast {
@@ -139,7 +202,7 @@ func (an *Analyser) Parse() *Ast {
 	switch nxt.Kind {
 	case "name":
 		if isKeyWord(string(nxt.Lexeme)) {
-			return an.parseModuleDec(nxt)
+			return an.parseKeyword(nxt)
 		}
 	}
 
