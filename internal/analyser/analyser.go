@@ -198,7 +198,6 @@ func (an *Analyser) parseModuleDec(tok *Token) *AstNode {
 	if nxt.Kind == CURL_OPEN {
 		an.stackPush(ast, CURL_CLOSE)
 	} else {
-		an.mustTerminate()
 		an.stackPush(ast, EOF)
 	}
 
@@ -245,7 +244,11 @@ func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
 
 	for nxt.Kind != PARAN_CLOSE {
 		ast.Args = append(ast.Args, an.parseFunctionParam(nxt))
-		nxt = an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+		nxt = an.mustAdvanceExpect(PARAN_CLOSE, COMMA)
+
+		if nxt.Kind == COMMA {
+			nxt = an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+		}
 	}
 
 	nxt = an.mustAdvanceExpect(COLON, CURL_OPEN)
