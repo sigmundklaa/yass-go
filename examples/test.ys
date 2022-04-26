@@ -1,0 +1,26 @@
+
+// module declaration
+module gangs
+
+/*
+Can alternatively be
+
+module gangs {
+    // Source here    
+}
+*/
+
+// import
+import nwpool
+import notif
+
+// function
+fn create(string name): nil {
+    nwpool.handle('gangs').post(name, (int id, error err){
+        if (err) {
+            notif.errf('Gang creation failed')
+        } else {
+            notif.printf('Gang created: %s', name)
+        }
+    })
+}

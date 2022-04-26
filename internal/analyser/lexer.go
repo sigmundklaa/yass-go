@@ -4,42 +4,106 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/SigJig/yass-go/internal/errhandler"
 )
 
-// TODO: Convert strings to numbered constants
-var defaultPattern = map[string]string{
-	"name":         `[a-zA-Z_]\w*`,
-	"semicolon":    ";",
-	"assign":       "=",
-	"comma":        ",",
-	"string":       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
-	"sqbrac_open":  "\\[",
-	"sqbrac_close": "\\]",
-	"paran_open":   "\\(",
-	"paran_close":  "\\)",
-	"curl_open":    "\\{",
-	"curl_close":   "\\}",
-	"newline":      "\n+",
-	"space_no_nl":  `(?:[^\S\r\n]+)`,
-	"comment_ml":   `(?:\/\*(?:[^\*]|\*[^\/])*(?:\*\/|$))`,
-	"comment_sl":   `(?://[^\n]*\n)`,
+type LexKind int
+
+const (
+	INVALID LexKind = iota
+	NAME
+	SEMICOLON
+	COLON
+	ASSIGN
+	COMMA
+	STRING
+	SQBRAC_OPEN
+	SQBRAC_CLOSE
+	PARAN_OPEN
+	PARAN_CLOSE
+	CURL_OPEN
+	CURL_CLOSE
+	NEWLINE
+	SPACE_NO_NL
+	COMMENT_ML
+	COMMENT_SL
+	EOF
+)
+
+var kindStrings = map[LexKind]string{
+	INVALID:      "INVALID",
+	NAME:         "NAME",
+	SEMICOLON:    "SEMICOLON",
+	COLON:        "COLON",
+	ASSIGN:       "ASSIGN",
+	COMMA:        "COMMA",
+	STRING:       "STRING",
+	SQBRAC_OPEN:  "SQBRAC_OPEN",
+	SQBRAC_CLOSE: "SQBRAC_CLOSE",
+	PARAN_OPEN:   "PARAN_OPEN",
+	PARAN_CLOSE:  "PARAN_CLOSE",
+	CURL_OPEN:    "CURL_OPEN",
+	CURL_CLOSE:   "CURL_CLOSE",
+	NEWLINE:      "NEWLINE",
+	SPACE_NO_NL:  "SPACE_NO_NL",
+	COMMENT_ML:   "COMMENT_ML",
+	COMMENT_SL:   "COMMENT_SL",
+	EOF:          "EOF",
 }
 
-func CompilePattern(pattern map[string]string) *regexp.Regexp {
+func (kind LexKind) String() string {
+	return kindStrings[kind]
+}
+
+func lexKindsJoin(kinds ...LexKind) string {
+	var builder strings.Builder
+
+	if len(kinds) > 0 {
+		fmt.Fprint(&builder, kinds[0].String())
+	}
+
+	for _, kind := range kinds[1:] {
+		fmt.Fprintf(&builder, "%s,", kind.String())
+	}
+
+	return builder.String()
+}
+
+// TODO: Convert strings to numbered constants
+var defaultPattern = map[LexKind]string{
+	NAME:         `[a-zA-Z_]\w*`,
+	SEMICOLON:    ";",
+	COLON:        ":",
+	ASSIGN:       "=",
+	COMMA:        ",",
+	STRING:       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
+	SQBRAC_OPEN:  "\\[",
+	SQBRAC_CLOSE: "\\]",
+	PARAN_OPEN:   "\\(",
+	PARAN_CLOSE:  "\\)",
+	CURL_OPEN:    "\\{",
+	CURL_CLOSE:   "\\}",
+	NEWLINE:      "\n+",
+	SPACE_NO_NL:  `(?:[^\S\r\n]+)`,
+	COMMENT_ML:   `(?:\/\*(?:[^\*]|\*[^\/])*(?:\*\/|$))`,
+	COMMENT_SL:   `(?://[^\n]*\n)`,
+}
+
+func CompilePattern(pattern map[LexKind]string) *regexp.Regexp {
 	var builder strings.Builder
 	builder.WriteString("^(?m)(?:")
 	addOr := false
 
-	for name, pattern := range pattern {
+	for kind, pattern := range pattern {
 		if addOr {
 			builder.WriteRune('|')
 		} else {
 			addOr = true
 		}
-		fmt.Fprintf(&builder, "(?P<%s>%s)", name, pattern)
+		fmt.Fprintf(&builder, "(?P<%s>%s)", strconv.Itoa(int(kind)), pattern)
 	}
 	builder.WriteRune(')')
 
@@ -55,7 +119,7 @@ const (
 )
 
 type Token struct {
-	Kind      string
+	Kind      LexKind
 	Lexeme    []rune
 	Line, Col uint
 }
@@ -146,7 +210,7 @@ func (l *Lexer) NextToken() (*Token, error) {
 
 	if err != nil {
 		if err == io.EOF {
-			return l.createToken("EOF", nil)
+			return l.createToken(EOF, nil)
 		}
 
 		return nil, err
@@ -164,13 +228,13 @@ func (l *Lexer) NextToken() (*Token, error) {
 	return tok, nil
 }
 
-func (l *Lexer) nextLexeme() ([]rune, string, error) {
+func (l *Lexer) nextLexeme() ([]rune, LexKind, error) {
 	sub := l.buf[l.bufpos:]
 
 	if len(sub) == 0 {
 		// Assuming that the buffer has been properly initalized and maintained, reaching its end
 		// will mean EOF
-		return nil, "", io.EOF
+		return nil, INVALID, io.EOF
 	}
 
 	matches := l.reg.FindStringSubmatch(string(sub))
@@ -180,14 +244,20 @@ func (l *Lexer) nextLexeme() ([]rune, string, error) {
 			lexeme := []rune(matches[idx+1])
 
 			if len(lexeme) > 0 {
-				return lexeme, name, nil
+				kind, err := strconv.Atoi(name)
+
+				if err != nil {
+					panic(err)
+				}
+
+				return lexeme, LexKind(kind), nil
 			}
 		}
 
 		panic(l.errf("unnamed submatch found at: %s", matches[0]))
 	}
 
-	return nil, "", l.errf("unrecognized character(s) at: %#v", string(sub[:5]))
+	return nil, INVALID, l.errf("unrecognized character(s) at: %#v", string(sub[:5]))
 }
 
 func (l *Lexer) advanceWith(tok *Token) {
@@ -209,6 +279,6 @@ func (l *Lexer) errf(fmtstr string, args ...interface{}) error {
 	return errhandler.Err("lexer", fmt.Sprintf(fmtstr, args...), l.line, l.col)
 }
 
-func (l *Lexer) createToken(kind string, lexeme []rune) (*Token, error) {
+func (l *Lexer) createToken(kind LexKind, lexeme []rune) (*Token, error) {
 	return &Token{kind, lexeme, l.line, l.col}, nil
 }

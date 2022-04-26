@@ -25,11 +25,11 @@ func testLex() {
 			panic(err)
 		}
 
-		if tok.Kind == "EOF" {
+		if tok.Kind == analyser.EOF {
 			break
 		}
 
-		if tok.Kind == "space_no_nl" {
+		if tok.Kind == analyser.SPACE_NO_NL {
 			continue
 		}
 
