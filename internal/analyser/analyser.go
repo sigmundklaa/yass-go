@@ -204,7 +204,7 @@ func (an *Analyser) parseModuleDec(tok *Token) *AstNode {
 	return ast
 }
 
-// classDef: "class" name ["(" inherits ("," inherits)* [","] ")"] "{" body "}"
+// classDef: "class" name ["(" [ inherits ("," inherits)* ] [","] ")"] "{" body "}"
 func (an *Analyser) parseClassDef(tok *Token) *AstNode {
 	name := an.mustAdvanceExpect(NAME)
 	nxt := an.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
@@ -234,13 +234,18 @@ func (an *Analyser) parseFunctionParam(tok *Token) *AstNode {
 	return ast
 }
 
-// funcDef: "fn" name "(" param ("," param)* [","] ")" [":" ret_type] "{" body "}"
+// funcDef: "fn" name "(" [ param ("," param)* ] [","] ")" [":" ret_type] "{" body "}"
 func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
 	name := an.mustAdvanceExpect(NAME)
 	ast := &AstNode{Kind: FUNCTION, Value: []*Token{name}, Args: nil, Children: nil}
 
 	an.mustAdvanceExpect(PARAN_OPEN)
-	nxt := an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+
+	nxt := an.mustAdvanceExpect(PARAN_CLOSE, NAME, COMMA)
+
+	if nxt.Kind == COMMA {
+		nxt = an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+	}
 
 	for nxt.Kind != PARAN_CLOSE {
 		ast.Args = append(ast.Args, an.parseFunctionParam(nxt))
