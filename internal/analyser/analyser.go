@@ -12,6 +12,8 @@ const (
 	MODULE AstKind = iota
 	CLASS
 	FUNCTION
+	FUNC_PARAM
+	RETURN_TYPE
 )
 
 var ignoreKinds = map[LexKind]bool{
@@ -39,8 +41,9 @@ func isIgnoreKind(tok *Token) bool {
 
 type AstNode struct {
 	Kind     AstKind
-	Args     []*Token
-	Children []*Token
+	Value    []*Token
+	Args     []*AstNode
+	Children []*AstNode
 }
 
 type stackItem struct {
@@ -64,7 +67,7 @@ func (an *Analyser) errf(tok *Token, format string, args ...interface{}) error {
 }
 
 func (an *Analyser) errUnexpectedKind(expected string, got *Token) error {
-	return an.errf(got, "unexpected token type: expected (%s), got: %s", expected, string(got.Kind))
+	return an.errf(got, "unexpected token type: expected (%s), got: %s", expected, got.Kind.String())
 }
 
 func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
@@ -116,7 +119,7 @@ func (an *Analyser) advance() (*Token, error) {
 	return token, nil
 }
 
-func (an *Analyser) stackAdd(ast *AstNode, closer LexKind) {
+func (an *Analyser) stackPush(ast *AstNode, closer LexKind) {
 	an.stack = append(an.stack, &stackItem{ast: ast, closer: closer})
 }
 
@@ -138,6 +141,10 @@ func (an *Analyser) mustAdvanceExpect(kinds ...LexKind) *Token {
 	}
 
 	panic(an.errUnexpectedKind(lexKindsJoin(kinds...), tok))
+}
+
+func (an *Analyser) mustTerminate() *Token {
+	return an.mustAdvanceExpect(NEWLINE, SEMICOLON)
 }
 
 func (an *Analyser) lookaheadIs(kinds ...LexKind) bool {
@@ -180,56 +187,58 @@ func (an *Analyser) parseSequence(closerKind, seperator LexKind, allowedTypes ..
 	return toks
 }
 
+// moduleDec: modulePartial | moduleFull
+// modulePartial: "module" name "{" body "}"
+// moduleFull: "module" name (";"|"\n")
 func (an *Analyser) parseModuleDec(tok *Token) *AstNode {
 	name := an.mustAdvanceExpect(NAME)
 	nxt := an.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
-	ast := &AstNode{Kind: MODULE, Args: []*Token{name}, Children: nil}
+	ast := &AstNode{Kind: MODULE, Value: []*Token{name}, Args: nil, Children: nil}
 
 	if nxt.Kind == CURL_OPEN {
-		an.stackAdd(ast, CURL_CLOSE)
+		an.stackPush(ast, CURL_CLOSE)
 	} else {
-		an.stackAdd(ast, EOF)
+		an.mustTerminate()
+		an.stackPush(ast, EOF)
 	}
 
 	return ast
 }
 
 // classDef: "class" name ["(" inherits ("," inherits)* [","] ")"] "{" body "}"
-// on inherit, returns Kind = "class_def_inherit", otherwise "class_def_noinherit"
-// on inherits returns
 func (an *Analyser) parseClassDef(tok *Token) *AstNode {
 	name := an.mustAdvanceExpect(NAME)
 	nxt := an.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
-	ast := &AstNode{Kind: CLASS, Args: []*Token{name}, Children: nil}
+	ast := &AstNode{Kind: CLASS, Value: []*Token{name}, Args: nil, Children: nil}
 
 	if nxt.Kind == PARAN_OPEN {
 		// Inherits
-		ast.Args = append(ast.Args, an.parseSequence(PARAN_CLOSE, COMMA, NAME)...)
+		ast.Value = append(ast.Value, an.parseSequence(PARAN_CLOSE, COMMA, NAME)...)
 
 		an.mustAdvanceExpect(CURL_OPEN)
 	}
 
-	an.stackAdd(ast, CURL_CLOSE)
+	an.stackPush(ast, CURL_CLOSE)
 
 	return ast
 }
 
 // param: type name ["=" expr]
-func (an *Analyser) parseFunctionParam(tok *Token) *Token {
-	// TODO: Verify type?
-	//	nxt := an.mustAdvanceExpect("name")
+func (an *Analyser) parseFunctionParam(tok *Token) *AstNode {
+	ast := &AstNode{Kind: FUNC_PARAM, Value: []*Token{tok, an.mustAdvanceExpect(NAME)}, Args: nil, Children: nil}
 
 	if an.lookaheadIs(ASSIGN) {
-		// TODO: = expr
+		an.mustAdvanceExpect(ASSIGN)
+		ast.Args = append(ast.Args, an.parseExpr(nil))
 	}
 
-	return nil
+	return ast
 }
 
 // funcDef: "fn" name "(" param ("," param)* [","] ")" [":" ret_type] "{" body "}"
 func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
 	name := an.mustAdvanceExpect(NAME)
-	ast := &AstNode{Kind: FUNCTION, Args: []*Token{name}, Children: nil}
+	ast := &AstNode{Kind: FUNCTION, Value: []*Token{name}, Args: nil, Children: nil}
 
 	an.mustAdvanceExpect(PARAN_OPEN)
 	nxt := an.mustAdvanceExpect(PARAN_CLOSE, NAME)
@@ -242,16 +251,17 @@ func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
 	nxt = an.mustAdvanceExpect(COLON, CURL_OPEN)
 
 	if nxt.Kind == COLON {
-		// TODO: Add return type
-
-		//		retT := an.mustAdvanceExpect("name")
-
+		ast.Args = append(ast.Args, &AstNode{Kind: RETURN_TYPE, Value: []*Token{an.mustAdvanceExpect(NAME)}, Args: nil, Children: nil})
 		nxt = an.mustAdvanceExpect(CURL_OPEN)
 	}
 
-	an.stackAdd(ast, CURL_CLOSE)
+	an.stackPush(ast, CURL_CLOSE)
 
 	return ast
+}
+
+func (an *Analyser) parseExpr(tok *Token) *AstNode {
+	return nil
 }
 
 func (an *Analyser) parseKeyword(tok *Token) *AstNode {
