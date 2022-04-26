@@ -244,7 +244,7 @@ func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
 	nxt := an.mustAdvanceExpect(PARAN_CLOSE, NAME, COMMA)
 
 	if nxt.Kind == COMMA {
-		nxt = an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+		nxt = an.mustAdvanceExpect(PARAN_CLOSE)
 	}
 
 	for nxt.Kind != PARAN_CLOSE {
