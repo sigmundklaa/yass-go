@@ -163,6 +163,10 @@ func NewLexer(reader io.RuneReader, pattern *regexp.Regexp, bufSize int) *Lexer 
 	return l
 }
 
+func DefaultLexer(reader io.RuneReader) *Lexer {
+	return NewLexer(reader, DefaultPattern(), -1)
+}
+
 func (l *Lexer) fillBuf(length uint) error {
 	if l.eof {
 		return nil

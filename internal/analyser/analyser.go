@@ -71,15 +71,21 @@ type stackItem struct {
 	closer LexKind
 }
 
+type statePath struct {
+	offset int
+	an     *Analyser
+}
+
 type Analyser struct {
 	eof              bool
 	lexer            *Lexer
 	stack            []*stackItem
 	token, lookahead *Token
+	buf              []*Token
 }
 
-func NewAnalyser() *Analyser {
-	return &Analyser{}
+func NewAnalyser(reader io.RuneReader) *Analyser {
+	return &Analyser{eof: false, lexer: DefaultLexer(reader), token: nil, lookahead: nil, buf: nil}
 }
 
 func (an *Analyser) errf(tok *Token, format string, args ...interface{}) error {
@@ -92,6 +98,14 @@ func (an *Analyser) errUnexpectedKind(expected string, got *Token) error {
 
 func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
 	return an.errf(got, "unexpected token value: expected (%s), got: %s", expected, string(got.Lexeme))
+}
+
+func (an *Analyser) newPath() *statePath {
+	return &statePath{offset: 0, an: an}
+}
+
+func (an *Analyser) selectPath(path *statePath) {
+	an.buf = an.buf[path.offset:]
 }
 
 func (an *Analyser) nextValidToken() (nxt *Token, err error) {
