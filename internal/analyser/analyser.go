@@ -357,7 +357,12 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 	nxt = path.mustAdvanceExpect(COLON, CURL_OPEN)
 
 	if nxt.Kind == COLON {
-		ast.Args = append(ast.Args, &AstNode{Kind: RETURN_TYPE, Value: []*Token{path.mustAdvanceExpect(NAME)}, Args: nil, Children: nil})
+		ast.Args = append(ast.Args, &AstNode{
+			Kind:     RETURN_TYPE,
+			Value:    []*Token{path.mustAdvanceExpect(NAME)},
+			Args:     nil,
+			Children: nil,
+		})
 		nxt = path.mustAdvanceExpect(CURL_OPEN)
 	}
 
@@ -366,13 +371,18 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 	return ast
 }
 
+// inlineSqf: "sqf" string (";"|"\n")
 func (path *parsePath) parseInlineSQF(tok *Token) *AstNode {
-	return &AstNode{
+	ast := &AstNode{
 		Kind:     INLINE_SQF,
 		Value:    []*Token{path.mustAdvanceExpect(STRING)},
 		Args:     nil,
 		Children: nil,
 	}
+
+	path.mustTerminate()
+
+	return ast
 }
 
 func (path *parsePath) parseExpr(tok *Token) *AstNode {
@@ -387,6 +397,8 @@ func (path *parsePath) parseKeyword(tok *Token, kw KeyWord) *AstNode {
 		return path.parseClassDef(tok)
 	case FUNCTION_DEF:
 		return path.parseFunctionDef(tok)
+	case SQF_STMT:
+		return path.parseInlineSQF(tok)
 	}
 
 	panic(path.an.errUnexpectedLexeme("keyword", tok))
