@@ -1,0 +1,65 @@
+# this file is only meant for humans
+
+start: module_dec+
+
+module_dec: module_full | module_partial
+module_full: "module" NAME term
+module_partial: "module" NAME "{" source "}"
+
+source: stmt*
+
+class_def: "class" NAME ["(" [ NAME ("," NAME)* ] [","] ")"] "{" class_internal "}"
+class_internal: function_def | var_dec
+
+function_def: "fn" NAME "(" type NAME [ASSIGN_OP expr] ")" [":" type ("," type)*] "{" source "}"
+type: reference
+
+stmt: simple_stmt | compound_stmt
+simple_stmt: (var_dec | expr | reassign | inline_sqf) term
+compound_stmt: module_dec | class_def | function_def | var_dec | if_stmt | else_stmt | for_stmt
+
+var_dec: type NAME [ASSIGN_OP expr]
+reassign: addassign | subassign | mulassign | divassign | modassign
+addassign: reference ADD_OP ASSIGN_OP expr
+subassign: reference SUB_OP ASSIGN_OP expr
+mulassign: reference MUL_OP ASSIGN_OP expr
+divassign: reference DIV_OP ASSIGN_OP expr
+modassign: reference MOD_OP ASSIGN_OP expr
+
+inline_sqf: "sqf" string
+
+ADD_OP: "+"
+SUB_OP: "-"
+MUL_OP: "*"
+DIV_OP: "/"
+MOD_OP: "%"
+
+expr: add_expr
+add_expr: sub_expr (ADD_OP sub_expr)*
+sub_expr: mul_expr (SUB_OP mul_expr)*
+mul_expr: div_expr (MUL_OP div_expr)*
+div_expr: mod_expr (DIV_OP mod_expr)*
+mod_expr: atom (MOD_OP atom)*
+
+atom: reference | call | NUMBER | string | array | dict | bool | index
+
+array: "[" [expr ("," expr)*] [","] "]"
+dict: "{" [dict_item ("," dict_item)*] [","] "}"
+dict_item: (NUMBER | string) ":" expr
+
+reference: ref_item ("." ref_item)*
+?ref_item: NAME | call
+call: reference "(" [ expr ("," expr)* ] [","] ")"
+
+index: expr "[" expr "]"
+
+?term: (SEMICOLON | NEWLINE)
+
+bool: "false" | "true"
+string: STRING_DQ | STRING_SQ
+
+NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
+SEMICOLON: ";"
+NEWLINE: "\n"
+ASSIGN_OP: "="
+NUMBER: /\d+/

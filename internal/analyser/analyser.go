@@ -2,6 +2,7 @@ package analyser
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/SigJig/yass-go/internal/errhandler"
 )
@@ -22,17 +23,36 @@ var ignoreKinds = map[LexKind]bool{
 	SPACE_NO_NL: true,
 }
 
-var keywords = stringset{}.add(
-	"module",
-	"class",
-	"fn",
-	"for",
-	"if",
-	"else",
+type KeyWord int
+
+const (
+	INVALID_KW KeyWord = iota
+	MODULE_DEC
+	CLASS_DEF
+	FUNCTION_DEF
+	FOR_STMT
+	IF_STMT
+	ELSE_STMT
+	SQF_STMT
 )
 
-func isKeyWord(word string) bool {
-	return keywords.contains(word)
+var keywords = map[KeyWord]string{
+	MODULE_DEC:   "module",
+	CLASS_DEF:    "class",
+	FUNCTION_DEF: "fn",
+	FOR_STMT:     "for",
+	IF_STMT:      "if",
+	ELSE_STMT:    "else",
+	SQF_STMT:     "sqf",
+}
+
+func isKeyWord(word string) KeyWord {
+	for k, v := range keywords {
+		if v == word {
+			return k
+		}
+	}
+	return INVALID_KW
 }
 
 func isIgnoreKind(tok *Token) bool {
@@ -90,7 +110,7 @@ func (an *Analyser) nextValidToken() (nxt *Token, err error) {
 
 func (an *Analyser) advance() (*Token, error) {
 	if an.eof {
-		return nil, fmt.Errorf("eof reached")
+		return nil, io.EOF
 	}
 
 	var token *Token
@@ -123,8 +143,11 @@ func (an *Analyser) stackPush(ast *AstNode, closer LexKind) {
 	an.stack = append(an.stack, &stackItem{ast: ast, closer: closer})
 }
 
-func (an *Analyser) stackPop(tok *Token) {
+func (an *Analyser) stackPop(tok *Token) *AstNode {
+	itm := an.stack[len(an.stack)-1]
 	an.stack = an.stack[:len(an.stack)-1]
+
+	return itm.ast
 }
 
 func (an *Analyser) mustAdvanceExpect(kinds ...LexKind) *Token {
@@ -272,37 +295,54 @@ func (an *Analyser) parseExpr(tok *Token) *AstNode {
 	return nil
 }
 
-func (an *Analyser) parseKeyword(tok *Token) *AstNode {
-	switch string(tok.Lexeme) {
-	case "module":
+func (an *Analyser) parseKeyword(tok *Token, kw KeyWord) *AstNode {
+	switch kw {
+	case MODULE_DEC:
 		return an.parseModuleDec(tok)
-	case "class":
+	case CLASS_DEF:
 		return an.parseClassDef(tok)
-	case "fn":
+	case FUNCTION_DEF:
 		return an.parseFunctionDef(tok)
 	}
 
 	panic(an.errUnexpectedLexeme("keyword", tok))
 }
 
-func (an *Analyser) Parse() *AstNode {
+func (an *Analyser) parseOne() (*AstNode, error) {
 	nxt, err := an.advance()
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
-		an.stackPop(nxt)
-		return nil
+		return an.stackPop(nxt), nil
 	}
 
 	switch nxt.Kind {
 	case NAME:
-		if isKeyWord(string(nxt.Lexeme)) {
-			return an.parseKeyword(nxt)
+		if kw := isKeyWord(string(nxt.Lexeme)); kw != INVALID_KW {
+			return an.parseKeyword(nxt, kw), nil
 		}
 	}
 
-	panic(an.errf(nxt, "unable to parse"))
+	return nil, an.errf(nxt, "unable to parse")
+}
+
+func (an *Analyser) Parse() []*AstNode {
+	nodes := []*AstNode{}
+
+	for {
+		nxt, err := an.parseOne()
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			panic(err)
+		}
+
+		nodes = append(nodes, nxt)
+	}
+	return nodes
 }
