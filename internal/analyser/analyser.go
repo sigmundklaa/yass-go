@@ -15,6 +15,7 @@ const (
 	FUNCTION
 	FUNC_PARAM
 	RETURN_TYPE
+	INLINE_SQF
 )
 
 var ignoreKinds = map[LexKind]bool{
@@ -71,9 +72,11 @@ type stackItem struct {
 	closer LexKind
 }
 
-type statePath struct {
+type parsePath struct {
+	eof    bool
 	offset int
 	an     *Analyser
+	stack  []*stackItem
 }
 
 type Analyser struct {
@@ -85,7 +88,13 @@ type Analyser struct {
 }
 
 func NewAnalyser(reader io.RuneReader) *Analyser {
-	return &Analyser{eof: false, lexer: DefaultLexer(reader), token: nil, lookahead: nil, buf: nil}
+	return &Analyser{
+		eof:       false,
+		lexer:     DefaultLexer(reader),
+		token:     nil,
+		lookahead: nil,
+		buf:       nil,
+	}
 }
 
 func (an *Analyser) errf(tok *Token, format string, args ...interface{}) error {
@@ -100,12 +109,21 @@ func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
 	return an.errf(got, "unexpected token value: expected (%s), got: %s", expected, string(got.Lexeme))
 }
 
-func (an *Analyser) newPath() *statePath {
-	return &statePath{offset: 0, an: an}
+func (an *Analyser) newPath() *parsePath {
+	return &parsePath{
+		eof:    false,
+		offset: 0,
+		an:     an,
+		stack:  nil,
+	}
 }
 
-func (an *Analyser) selectPath(path *statePath) {
+func (an *Analyser) selectPath(path *parsePath) {
 	an.buf = an.buf[path.offset:]
+	an.eof = an.eof || path.eof
+	an.stack = append(an.stack, path.stack...)
+
+	//return path.ast
 }
 
 func (an *Analyser) nextValidToken() (nxt *Token, err error) {
@@ -122,50 +140,73 @@ func (an *Analyser) nextValidToken() (nxt *Token, err error) {
 	}
 }
 
-func (an *Analyser) advance() (*Token, error) {
-	if an.eof {
+func (an *Analyser) fillBuf() error {
+	tok, err := an.nextValidToken()
+
+	if err != nil {
+		return err
+	}
+
+	an.buf = append(an.buf, tok)
+
+	return nil
+}
+
+func (path *parsePath) advance() (*Token, error) {
+	if path.eof {
 		return nil, io.EOF
 	}
 
 	var token *Token
 	var err error
 
-	if an.token == nil || an.lookahead == nil {
-		token, err = an.nextValidToken()
+	if path.lookahead() == nil {
+		err = path.an.fillBuf()
 
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		token = an.lookahead
 	}
 
-	if token.Kind == EOF {
-		an.eof = true
-	} else {
-		an.lookahead, err = an.nextValidToken()
+	path.offset += 1
+	token = path.current()
 
-		if err != nil {
-			return nil, err
-		}
+	if token.Kind == EOF {
+		path.eof = true
 	}
 
 	return token, nil
 }
 
-func (an *Analyser) stackPush(ast *AstNode, closer LexKind) {
-	an.stack = append(an.stack, &stackItem{ast: ast, closer: closer})
+func stackPush(stack *[]*stackItem, ast *AstNode, closer LexKind) {
+	*stack = append(*stack, &stackItem{ast: ast, closer: closer})
 }
 
-func (an *Analyser) stackPop(tok *Token) *AstNode {
-	itm := an.stack[len(an.stack)-1]
-	an.stack = an.stack[:len(an.stack)-1]
+func stackPop(stack *[]*stackItem, tok *Token) *AstNode {
+	itm := (*stack)[len(*stack)-1]
+	*stack = (*stack)[:len(*stack)-1]
 
 	return itm.ast
 }
 
-func (an *Analyser) mustAdvanceExpect(kinds ...LexKind) *Token {
-	tok, err := an.advance()
+func (path *parsePath) current() *Token {
+	if path.offset >= len(path.an.buf) {
+		return nil
+	}
+
+	return path.an.buf[path.offset]
+}
+
+func (path *parsePath) lookahead() *Token {
+	if path.offset+1 >= len(path.an.buf) {
+		return nil
+	}
+
+	return path.an.buf[path.offset+1]
+}
+
+func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
+	tok, err := path.advance()
 
 	if err != nil {
 		panic(err)
@@ -177,15 +218,15 @@ func (an *Analyser) mustAdvanceExpect(kinds ...LexKind) *Token {
 		}
 	}
 
-	panic(an.errUnexpectedKind(lexKindsJoin(kinds...), tok))
+	panic(path.an.errUnexpectedKind(lexKindsJoin(kinds...), tok))
 }
 
-func (an *Analyser) mustTerminate() *Token {
-	return an.mustAdvanceExpect(NEWLINE, SEMICOLON)
+func (path *parsePath) mustTerminate() *Token {
+	return path.mustAdvanceExpect(NEWLINE, SEMICOLON)
 }
 
-func (an *Analyser) lookaheadIs(kinds ...LexKind) bool {
-	kind := an.lookahead.Kind
+func (path *parsePath) lookaheadIs(kinds ...LexKind) bool {
+	kind := path.lookahead().Kind
 
 	for _, k := range kinds {
 		if kind == k {
@@ -201,12 +242,12 @@ End helpers
 Begin parser functions
 *******************************************************************/
 
-func (an *Analyser) parseSequence(closerKind, seperator LexKind, allowedTypes ...LexKind) []*Token {
+func (path *parsePath) parseSequence(closerKind, seperator LexKind, allowedTypes ...LexKind) []*Token {
 	toks := []*Token{}
 	allowedTypes = append(allowedTypes, closerKind)
 
 	for {
-		nxt := an.mustAdvanceExpect(allowedTypes...)
+		nxt := path.mustAdvanceExpect(allowedTypes...)
 
 		if nxt.Kind == closerKind {
 			break
@@ -214,7 +255,7 @@ func (an *Analyser) parseSequence(closerKind, seperator LexKind, allowedTypes ..
 
 		toks = append(toks, nxt)
 
-		sep := an.mustAdvanceExpect(seperator, closerKind)
+		sep := path.mustAdvanceExpect(seperator, closerKind)
 
 		if sep.Kind == closerKind {
 			break
@@ -227,120 +268,163 @@ func (an *Analyser) parseSequence(closerKind, seperator LexKind, allowedTypes ..
 // moduleDec: modulePartial | moduleFull
 // modulePartial: "module" name "{" body "}"
 // moduleFull: "module" name (";"|"\n")
-func (an *Analyser) parseModuleDec(tok *Token) *AstNode {
-	name := an.mustAdvanceExpect(NAME)
-	nxt := an.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
-	ast := &AstNode{Kind: MODULE, Value: []*Token{name}, Args: nil, Children: nil}
+func (path *parsePath) parseModuleDec(tok *Token) *AstNode {
+	name := path.mustAdvanceExpect(NAME)
+	nxt := path.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
+	ast := &AstNode{
+		Kind:     MODULE,
+		Value:    []*Token{name},
+		Args:     nil,
+		Children: nil,
+	}
 
 	if nxt.Kind == CURL_OPEN {
-		an.stackPush(ast, CURL_CLOSE)
+		stackPush(&path.stack, ast, CURL_CLOSE)
 	} else {
-		an.stackPush(ast, EOF)
+		stackPush(&path.stack, ast, EOF)
 	}
 
 	return ast
 }
 
 // classDef: "class" name ["(" [ inherits ("," inherits)* ] [","] ")"] "{" body "}"
-func (an *Analyser) parseClassDef(tok *Token) *AstNode {
-	name := an.mustAdvanceExpect(NAME)
-	nxt := an.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
-	ast := &AstNode{Kind: CLASS, Value: []*Token{name}, Args: nil, Children: nil}
+func (path *parsePath) parseClassDef(tok *Token) *AstNode {
+	name := path.mustAdvanceExpect(NAME)
+	nxt := path.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
+	ast := &AstNode{
+		Kind:     CLASS,
+		Value:    []*Token{name},
+		Args:     nil,
+		Children: nil,
+	}
 
 	if nxt.Kind == PARAN_OPEN {
 		// Inherits
-		ast.Value = append(ast.Value, an.parseSequence(PARAN_CLOSE, COMMA, NAME)...)
+		ast.Value = append(ast.Value, path.parseSequence(PARAN_CLOSE, COMMA, NAME)...)
 
-		an.mustAdvanceExpect(CURL_OPEN)
+		path.mustAdvanceExpect(CURL_OPEN)
 	}
 
-	an.stackPush(ast, CURL_CLOSE)
+	stackPush(&path.stack, ast, CURL_CLOSE)
 
 	return ast
 }
 
 // param: type name ["=" expr]
-func (an *Analyser) parseFunctionParam(tok *Token) *AstNode {
-	ast := &AstNode{Kind: FUNC_PARAM, Value: []*Token{tok, an.mustAdvanceExpect(NAME)}, Args: nil, Children: nil}
+func (path *parsePath) parseFunctionParam(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind:     FUNC_PARAM,
+		Value:    []*Token{tok, path.mustAdvanceExpect(NAME)},
+		Args:     nil,
+		Children: nil,
+	}
 
-	if an.lookaheadIs(ASSIGN) {
-		an.mustAdvanceExpect(ASSIGN)
-		ast.Args = append(ast.Args, an.parseExpr(nil))
+	if path.lookaheadIs(ASSIGN) {
+		path.mustAdvanceExpect(ASSIGN)
+		ast.Args = append(ast.Args, path.parseExpr(nil))
 	}
 
 	return ast
 }
 
 // funcDef: "fn" name "(" [ param ("," param)* ] [","] ")" [":" ret_type] "{" body "}"
-func (an *Analyser) parseFunctionDef(tok *Token) *AstNode {
-	name := an.mustAdvanceExpect(NAME)
-	ast := &AstNode{Kind: FUNCTION, Value: []*Token{name}, Args: nil, Children: nil}
+func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
+	name := path.mustAdvanceExpect(NAME)
+	ast := &AstNode{
+		Kind:     FUNCTION,
+		Value:    []*Token{name},
+		Args:     nil,
+		Children: nil,
+	}
 
-	an.mustAdvanceExpect(PARAN_OPEN)
+	path.mustAdvanceExpect(PARAN_OPEN)
 
-	nxt := an.mustAdvanceExpect(PARAN_CLOSE, NAME, COMMA)
+	nxt := path.mustAdvanceExpect(PARAN_CLOSE, NAME, COMMA)
 
 	if nxt.Kind == COMMA {
-		nxt = an.mustAdvanceExpect(PARAN_CLOSE)
+		nxt = path.mustAdvanceExpect(PARAN_CLOSE)
 	}
 
 	for nxt.Kind != PARAN_CLOSE {
-		ast.Args = append(ast.Args, an.parseFunctionParam(nxt))
-		nxt = an.mustAdvanceExpect(PARAN_CLOSE, COMMA)
+		ast.Args = append(ast.Args, path.parseFunctionParam(nxt))
+		nxt = path.mustAdvanceExpect(PARAN_CLOSE, COMMA)
 
 		if nxt.Kind == COMMA {
-			nxt = an.mustAdvanceExpect(PARAN_CLOSE, NAME)
+			nxt = path.mustAdvanceExpect(PARAN_CLOSE, NAME)
 		}
 	}
 
-	nxt = an.mustAdvanceExpect(COLON, CURL_OPEN)
+	nxt = path.mustAdvanceExpect(COLON, CURL_OPEN)
 
 	if nxt.Kind == COLON {
-		ast.Args = append(ast.Args, &AstNode{Kind: RETURN_TYPE, Value: []*Token{an.mustAdvanceExpect(NAME)}, Args: nil, Children: nil})
-		nxt = an.mustAdvanceExpect(CURL_OPEN)
+		ast.Args = append(ast.Args, &AstNode{Kind: RETURN_TYPE, Value: []*Token{path.mustAdvanceExpect(NAME)}, Args: nil, Children: nil})
+		nxt = path.mustAdvanceExpect(CURL_OPEN)
 	}
 
-	an.stackPush(ast, CURL_CLOSE)
+	stackPush(&path.stack, ast, CURL_CLOSE)
 
 	return ast
 }
 
-func (an *Analyser) parseExpr(tok *Token) *AstNode {
+func (path *parsePath) parseInlineSQF(tok *Token) *AstNode {
+	return &AstNode{
+		Kind:     INLINE_SQF,
+		Value:    []*Token{path.mustAdvanceExpect(STRING)},
+		Args:     nil,
+		Children: nil,
+	}
+}
+
+func (path *parsePath) parseExpr(tok *Token) *AstNode {
 	return nil
 }
 
-func (an *Analyser) parseKeyword(tok *Token, kw KeyWord) *AstNode {
+func (path *parsePath) parseKeyword(tok *Token, kw KeyWord) *AstNode {
 	switch kw {
 	case MODULE_DEC:
-		return an.parseModuleDec(tok)
+		return path.parseModuleDec(tok)
 	case CLASS_DEF:
-		return an.parseClassDef(tok)
+		return path.parseClassDef(tok)
 	case FUNCTION_DEF:
-		return an.parseFunctionDef(tok)
+		return path.parseFunctionDef(tok)
 	}
 
-	panic(an.errUnexpectedLexeme("keyword", tok))
+	panic(path.an.errUnexpectedLexeme("keyword", tok))
+}
+
+func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
+	switch tok.Kind {
+	case NAME:
+		if kw := isKeyWord(string(tok.Lexeme)); kw != INVALID_KW {
+			return path, path.parseKeyword(tok, kw), nil
+		}
+	}
+
+	return path, nil, path.an.errf(tok, "unable to parse")
 }
 
 func (an *Analyser) parseOne() (*AstNode, error) {
-	nxt, err := an.advance()
+	path := an.newPath()
+	defer an.selectPath(path)
+
+	nxt, err := path.advance()
 
 	if err != nil {
 		return nil, err
 	}
 
 	if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
-		return an.stackPop(nxt), nil
+		return stackPop(&an.stack, nxt), nil
 	}
 
-	switch nxt.Kind {
-	case NAME:
-		if kw := isKeyWord(string(nxt.Lexeme)); kw != INVALID_KW {
-			return an.parseKeyword(nxt, kw), nil
-		}
+	var ast *AstNode
+	path, ast, err = an.parseTok(path, nxt)
+
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, an.errf(nxt, "unable to parse")
+	return ast, nil
 }
 
 func (an *Analyser) Parse() []*AstNode {
