@@ -24,10 +24,10 @@ var ignoreKinds = map[LexKind]bool{
 	SPACE_NO_NL: true,
 }
 
-type KeyWord int
+type Keyword int
 
 const (
-	INVALID_KW KeyWord = iota
+	INVALID_KW Keyword = iota
 	MODULE_DEC
 	CLASS_DEF
 	FUNCTION_DEF
@@ -37,7 +37,7 @@ const (
 	SQF_STMT
 )
 
-var keywords = map[KeyWord]string{
+var keywords = map[Keyword]string{
 	MODULE_DEC:   "module",
 	CLASS_DEF:    "class",
 	FUNCTION_DEF: "fn",
@@ -47,7 +47,7 @@ var keywords = map[KeyWord]string{
 	SQF_STMT:     "sqf",
 }
 
-func isKeyWord(word string) KeyWord {
+func isKeyword(word string) Keyword {
 	for k, v := range keywords {
 		if v == word {
 			return k
@@ -389,7 +389,11 @@ func (path *parsePath) parseExpr(tok *Token) *AstNode {
 	return nil
 }
 
-func (path *parsePath) parseKeyword(tok *Token, kw KeyWord) *AstNode {
+func (path *parsePath) parseKeyword(tok *Token, kw Keyword) *AstNode {
+	if kw != isKeyword(string(tok.Lexeme)) {
+		return nil
+	}
+
 	switch kw {
 	case MODULE_DEC:
 		return path.parseModuleDec(tok)
@@ -407,7 +411,7 @@ func (path *parsePath) parseKeyword(tok *Token, kw KeyWord) *AstNode {
 func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
 	switch tok.Kind {
 	case NAME:
-		if kw := isKeyWord(string(tok.Lexeme)); kw != INVALID_KW {
+		if kw := isKeyword(string(tok.Lexeme)); kw != INVALID_KW {
 			return path, path.parseKeyword(tok, kw), nil
 		}
 	}
