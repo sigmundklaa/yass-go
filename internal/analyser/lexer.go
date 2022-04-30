@@ -25,6 +25,7 @@ const (
 	PERCENTAGE
 	COMMA
 	STRING
+	NUMBER
 	PERIOD
 	SQBRAC_OPEN
 	SQBRAC_CLOSE
@@ -53,6 +54,7 @@ var kindStrings = map[LexKind]string{
 	PERIOD:       "PERIOD",
 	COMMA:        "COMMA",
 	STRING:       "STRING",
+	NUMBER:       "NUMBER",
 	SQBRAC_OPEN:  "SQBRAC_OPEN",
 	SQBRAC_CLOSE: "SQBRAC_CLOSE",
 	PARAN_OPEN:   "PARAN_OPEN",
@@ -98,6 +100,7 @@ var defaultPattern = map[LexKind]string{
 	COMMA:        ",",
 	PERIOD:       "\\.",
 	STRING:       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
+	NUMBER:       `\d+`,
 	SQBRAC_OPEN:  "\\[",
 	SQBRAC_CLOSE: "\\]",
 	PARAN_OPEN:   "\\(",
