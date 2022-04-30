@@ -18,6 +18,11 @@ const (
 	SEMICOLON
 	COLON
 	ASSIGN
+	PLUS
+	MINUS
+	SLASH
+	STAR
+	PERCENTAGE
 	COMMA
 	STRING
 	PERIOD
@@ -39,6 +44,11 @@ var kindStrings = map[LexKind]string{
 	NAME:         "NAME",
 	SEMICOLON:    "SEMICOLON",
 	COLON:        "COLON",
+	PLUS:         "PLUS",
+	MINUS:        "MINUS",
+	SLASH:        "SLASH",
+	STAR:         "STAR",
+	PERCENTAGE:   "PERCENTAGE",
 	ASSIGN:       "ASSIGN",
 	PERIOD:       "PERIOD",
 	COMMA:        "COMMA",
@@ -80,6 +90,11 @@ var defaultPattern = map[LexKind]string{
 	SEMICOLON:    ";",
 	COLON:        ":",
 	ASSIGN:       "=",
+	PLUS:         "+",
+	MINUS:        "-",
+	SLASH:        "\\/",
+	STAR:         "\\*",
+	PERCENTAGE:   "%",
 	COMMA:        ",",
 	PERIOD:       "\\.",
 	STRING:       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,

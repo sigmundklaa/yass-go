@@ -20,6 +20,11 @@ const (
 	INLINE_SQF
 	REFERENCE
 	REF_SEQUENCE
+	ADDITION
+	SUBTRACTION
+	DIVISION
+	MULTIPLICATION
+	MODULO
 )
 
 var ignoreKinds = map[LexKind]bool{
@@ -440,8 +445,64 @@ func (path *parsePath) parseReference(tok *Token) *AstNode {
 	return ast
 }
 
-func (path *parsePath) parseExpr(tok *Token) *AstNode {
+func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	return nil
+}
+
+type arithExpr struct {
+	operand LexKind
+	output  AstKind
+}
+
+func (path *parsePath) parseArithExpr(tok *Token, exprs []*arithExpr, idx int) *AstNode {
+	nxtGetter := func(tok *Token) *AstNode {
+		return path.parseArithExpr(tok, exprs, idx+1)
+	}
+
+	// last iteration
+	if idx >= len(exprs)-1 {
+		nxtGetter = path.parseAtom
+	}
+
+	expr := exprs[idx]
+
+	ast := &AstNode{
+		Kind:     expr.output,
+		Value:    nil,
+		Args:     []*AstNode{nxtGetter(tok)},
+		Children: nil,
+	}
+
+	for path.lookaheadIs(expr.operand) {
+		path.mustAdvanceExpect(expr.operand)
+
+		ast.Args = append(ast.Args, nxtGetter(path.mustAdvance()))
+	}
+
+	if len(ast.Args) > 1 {
+		return ast
+	}
+
+	// operand wasnt encountered, return first and only argument
+	return ast.Args[0]
+}
+
+// expr: add_expr
+// add_expr: sub_expr ("+" sub_expr)*
+// sub_expr: div_expr ("-" div_expr)*
+// div_expr: mul_expr ("/" mul_expr)*
+// mul_expr: mod_expr ("*" mod_expr)*
+// mod_expr: atom ("%" atom)*
+func (path *parsePath) parseExpr(tok *Token) *AstNode {
+	exprs := []*arithExpr{
+		{PLUS, ADDITION},
+		{MINUS, SUBTRACTION},
+		{SLASH, DIVISION},
+		{STAR, MULTIPLICATION},
+		{PERCENTAGE, MODULO},
+	}
+
+	return path.parseArithExpr(tok, exprs, 0)
 }
 
 func (path *parsePath) parseKeyword(tok *Token, kw Keyword) *AstNode {
