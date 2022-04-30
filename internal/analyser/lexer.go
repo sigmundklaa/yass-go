@@ -20,6 +20,7 @@ const (
 	ASSIGN
 	COMMA
 	STRING
+	PERIOD
 	SQBRAC_OPEN
 	SQBRAC_CLOSE
 	PARAN_OPEN
@@ -39,6 +40,7 @@ var kindStrings = map[LexKind]string{
 	SEMICOLON:    "SEMICOLON",
 	COLON:        "COLON",
 	ASSIGN:       "ASSIGN",
+	PERIOD:       "PERIOD",
 	COMMA:        "COMMA",
 	STRING:       "STRING",
 	SQBRAC_OPEN:  "SQBRAC_OPEN",
@@ -79,6 +81,7 @@ var defaultPattern = map[LexKind]string{
 	COLON:        ":",
 	ASSIGN:       "=",
 	COMMA:        ",",
+	PERIOD:       "\\.",
 	STRING:       `"(?:[^"\\]|[\\](?:[\\]{2})*[^\"])*"`,
 	SQBRAC_OPEN:  "\\[",
 	SQBRAC_CLOSE: "\\]",

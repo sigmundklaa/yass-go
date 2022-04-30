@@ -7,6 +7,8 @@ import (
 	"github.com/SigJig/yass-go/internal/errhandler"
 )
 
+var expectFailed error
+
 type AstKind int
 
 const (
@@ -16,6 +18,8 @@ const (
 	FUNC_PARAM
 	RETURN_TYPE
 	INLINE_SQF
+	REFERENCE
+	REF_SEQUENCE
 )
 
 var ignoreKinds = map[LexKind]bool{
@@ -109,13 +113,20 @@ func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
 	return an.errf(got, "unexpected token value: expected (%s), got: %s", expected, string(got.Lexeme))
 }
 
-func (an *Analyser) newPath() *parsePath {
-	return &parsePath{
+func (an *Analyser) newPath(base *parsePath) *parsePath {
+	path := &parsePath{
 		eof:    false,
 		offset: 0,
 		an:     an,
 		stack:  nil,
 	}
+
+	if base != nil {
+		path.eof = base.eof
+		path.offset = base.offset
+	}
+
+	return path
 }
 
 func (an *Analyser) selectPath(path *parsePath) {
@@ -178,11 +189,21 @@ func (path *parsePath) advance() (*Token, error) {
 	return token, nil
 }
 
+func (path *parsePath) mustAdvance() *Token {
+	tok, err := path.advance()
+
+	if err != nil {
+		panic(err)
+	}
+
+	return tok
+}
+
 func stackPush(stack *[]*stackItem, ast *AstNode, closer LexKind) {
 	*stack = append(*stack, &stackItem{ast: ast, closer: closer})
 }
 
-func stackPop(stack *[]*stackItem, tok *Token) *AstNode {
+func stackPop(stack *[]*stackItem) *AstNode {
 	itm := (*stack)[len(*stack)-1]
 	*stack = (*stack)[:len(*stack)-1]
 
@@ -218,7 +239,7 @@ func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
 		}
 	}
 
-	panic(path.an.errUnexpectedKind(lexKindsJoin(kinds...), tok))
+	panic(expectFailed)
 }
 
 func (path *parsePath) mustTerminate() *Token {
@@ -242,45 +263,49 @@ End helpers
 Begin parser functions
 *******************************************************************/
 
-func (path *parsePath) parseSequence(closerKind, seperator LexKind, allowedTypes ...LexKind) []*Token {
-	toks := []*Token{}
-	allowedTypes = append(allowedTypes, closerKind)
-
-	for {
-		nxt := path.mustAdvanceExpect(allowedTypes...)
-
-		if nxt.Kind == closerKind {
-			break
-		}
-
-		toks = append(toks, nxt)
-
-		sep := path.mustAdvanceExpect(seperator, closerKind)
-
-		if sep.Kind == closerKind {
-			break
-		}
+func (path *parsePath) parseRefSequence(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind:     REF_SEQUENCE,
+		Value:    nil,
+		Args:     nil,
+		Children: nil,
 	}
 
-	return toks
+	if tok.Kind == COMMA {
+		// if first is comma, then no references can follow
+		return ast
+	}
+
+	for path.lookaheadIs(COMMA) {
+		path.mustAdvanceExpect(COMMA)
+
+		if !path.lookaheadIs(NAME) {
+			break
+		}
+
+		ast.Args = append(ast.Args, path.parseReference(path.mustAdvance()))
+	}
+
+	return ast
 }
 
 // moduleDec: modulePartial | moduleFull
 // modulePartial: "module" name "{" body "}"
 // moduleFull: "module" name (";"|"\n")
 func (path *parsePath) parseModuleDec(tok *Token) *AstNode {
-	name := path.mustAdvanceExpect(NAME)
-	nxt := path.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
 	ast := &AstNode{
 		Kind:     MODULE,
-		Value:    []*Token{name},
-		Args:     nil,
+		Value:    nil,
+		Args:     []*AstNode{path.parseReference(path.mustAdvance())},
 		Children: nil,
 	}
+
+	nxt := path.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
 
 	if nxt.Kind == CURL_OPEN {
 		stackPush(&path.stack, ast, CURL_CLOSE)
 	} else {
+		// module applies to whole file
 		stackPush(&path.stack, ast, EOF)
 	}
 
@@ -289,19 +314,19 @@ func (path *parsePath) parseModuleDec(tok *Token) *AstNode {
 
 // classDef: "class" name ["(" [ inherits ("," inherits)* ] [","] ")"] "{" body "}"
 func (path *parsePath) parseClassDef(tok *Token) *AstNode {
-	name := path.mustAdvanceExpect(NAME)
-	nxt := path.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
 	ast := &AstNode{
 		Kind:     CLASS,
-		Value:    []*Token{name},
-		Args:     nil,
+		Value:    nil,
+		Args:     []*AstNode{path.parseReference(path.mustAdvance())}, // name
 		Children: nil,
 	}
 
-	if nxt.Kind == PARAN_OPEN {
-		// Inherits
-		ast.Value = append(ast.Value, path.parseSequence(PARAN_CLOSE, COMMA, NAME)...)
+	nxt := path.mustAdvanceExpect(PARAN_OPEN, CURL_OPEN)
 
+	// Inherits
+	if nxt.Kind == PARAN_OPEN {
+		ast.Args = append(ast.Args, path.parseRefSequence(path.mustAdvance()))
+		path.mustAdvanceExpect(PARAN_CLOSE)
 		path.mustAdvanceExpect(CURL_OPEN)
 	}
 
@@ -313,9 +338,12 @@ func (path *parsePath) parseClassDef(tok *Token) *AstNode {
 // param: type name ["=" expr]
 func (path *parsePath) parseFunctionParam(tok *Token) *AstNode {
 	ast := &AstNode{
-		Kind:     FUNC_PARAM,
-		Value:    []*Token{tok, path.mustAdvanceExpect(NAME)},
-		Args:     nil,
+		Kind:  FUNC_PARAM,
+		Value: nil,
+		Args: []*AstNode{
+			path.parseReference(tok),                // type
+			path.parseReference(path.mustAdvance()), // name
+		},
 		Children: nil,
 	}
 
@@ -327,13 +355,13 @@ func (path *parsePath) parseFunctionParam(tok *Token) *AstNode {
 	return ast
 }
 
-// funcDef: "fn" name "(" [ param ("," param)* ] [","] ")" [":" ret_type] "{" body "}"
+// funcDef: "fn" name "(" [ param ("," param)* ] [","] ")" [":" ret_type ("," ret_type)* [","]] "{" body "}"
+// assumes "fn" has been encountered
 func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
-	name := path.mustAdvanceExpect(NAME)
 	ast := &AstNode{
 		Kind:     FUNCTION,
-		Value:    []*Token{name},
-		Args:     nil,
+		Value:    nil,
+		Args:     []*AstNode{path.parseReference(path.mustAdvance())},
 		Children: nil,
 	}
 
@@ -359,11 +387,15 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 	if nxt.Kind == COLON {
 		ast.Args = append(ast.Args, &AstNode{
 			Kind:     RETURN_TYPE,
-			Value:    []*Token{path.mustAdvanceExpect(NAME)},
-			Args:     nil,
+			Value:    nil,
+			Args:     []*AstNode{path.parseRefSequence(path.mustAdvance())},
 			Children: nil,
 		})
-		nxt = path.mustAdvanceExpect(CURL_OPEN)
+		nxt = path.mustAdvanceExpect(COMMA, CURL_OPEN)
+
+		if nxt.Kind == COMMA {
+			path.mustAdvanceExpect(CURL_OPEN)
+		}
 	}
 
 	stackPush(&path.stack, ast, CURL_CLOSE)
@@ -372,6 +404,7 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 }
 
 // inlineSqf: "sqf" string (";"|"\n")
+// assumes "sqf" has been encountered
 func (path *parsePath) parseInlineSQF(tok *Token) *AstNode {
 	ast := &AstNode{
 		Kind:     INLINE_SQF,
@@ -381,6 +414,28 @@ func (path *parsePath) parseInlineSQF(tok *Token) *AstNode {
 	}
 
 	path.mustTerminate()
+
+	return ast
+}
+
+// reference: NAME ("." NAME)*
+func (path *parsePath) parseReference(tok *Token) *AstNode {
+	if tok.Kind != NAME {
+		panic(expectFailed)
+	}
+
+	ast := &AstNode{
+		Kind:     REFERENCE,
+		Value:    []*Token{tok},
+		Args:     nil,
+		Children: nil,
+	}
+
+	for path.lookaheadIs(PERIOD) {
+		path.mustAdvanceExpect(PERIOD)
+
+		ast.Value = append(ast.Value, path.mustAdvanceExpect(NAME))
+	}
 
 	return ast
 }
@@ -420,21 +475,28 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 }
 
 func (an *Analyser) parseOne() (*AstNode, error) {
-	path := an.newPath()
+	path := an.newPath(nil)
 	defer an.selectPath(path)
 
 	nxt, err := path.advance()
 
-	if err != nil {
-		return nil, err
+	for {
+		if err != nil {
+			return nil, err
+		}
+
+		if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
+			stackPop(&an.stack)
+		}
+
+		if !(nxt.Kind == SEMICOLON || nxt.Kind == NEWLINE) {
+			break
+		}
+
+		nxt, err = path.advance()
 	}
 
-	if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
-		return stackPop(&an.stack, nxt), nil
-	}
-
-	var ast *AstNode
-	path, ast, err = an.parseTok(path, nxt)
+	path, ast, err := an.parseTok(path, nxt)
 
 	if err != nil {
 		return nil, err
@@ -453,10 +515,13 @@ func (an *Analyser) Parse() []*AstNode {
 			if err == io.EOF {
 				break
 			}
+
 			panic(err)
 		}
 
-		nodes = append(nodes, nxt)
+		if nxt != nil {
+			nodes = append(nodes, nxt)
+		}
 	}
 	return nodes
 }
