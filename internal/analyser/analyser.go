@@ -25,7 +25,7 @@ const (
 	DICT
 	DICT_ITEM
 	REFERENCE
-	REF_SEQUENCE
+	NAME_SEQUENCE
 	NAME_FULL
 	SLICE
 	ADDITION
@@ -302,30 +302,24 @@ func (path *parsePath) lookaheadIs(kinds ...LexKind) bool {
 	return false
 }
 
-func (path *parsePath) tryParse(fn parseFn, tok *Token) (ret *AstNode) {
-	defer func() {
-		if r := recover(); r != nil {
-			if r == expectFailed {
-				ret = nil
-			}
-
-			panic(r)
+func recoverExpFail(ret **AstNode) {
+	if r := recover(); r != nil {
+		if r == expectFailed {
+			*ret = nil
 		}
-	}()
+
+		panic(r)
+	}
+}
+
+func (path *parsePath) tryParse(fn parseFn, tok *Token) (ret *AstNode) {
+	defer recoverExpFail(&ret)
 
 	return fn(tok)
 }
 
 func (path *parsePath) tryParseAs(fn parseAsFn, ast *AstNode) (ret *AstNode) {
-	defer func() {
-		if r := recover(); r != nil {
-			if r == expectFailed {
-				ret = nil
-			}
-
-			panic(r)
-		}
-	}()
+	defer recoverExpFail(&ret)
 
 	return fn(ast)
 }
@@ -337,7 +331,7 @@ Begin parser functions
 
 func (path *parsePath) parseNameSequence(tok *Token) *AstNode {
 	ast := &AstNode{
-		Kind:     REF_SEQUENCE,
+		Kind:     NAME_SEQUENCE,
 		Value:    nil,
 		Args:     []*AstNode{path.parseNameFull(tok)},
 		Children: nil,
