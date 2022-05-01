@@ -3,6 +3,7 @@ package analyser
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/SigJig/yass-go/internal/errhandler"
 )
@@ -62,6 +63,27 @@ var keywords = map[Keyword]string{
 	IF_STMT:      "if",
 	ELSE_STMT:    "else",
 	SQF_STMT:     "sqf",
+}
+
+func (kw Keyword) String() string {
+	return keywords[kw]
+}
+
+func keywordsJoin() string {
+	var builder strings.Builder
+
+	comma := false
+	for _, v := range keywords {
+		if comma {
+			builder.WriteRune(',')
+		} else {
+			comma = true
+		}
+
+		builder.WriteString(v)
+	}
+
+	return builder.String()
 }
 
 func isKeyword(word string) Keyword {
@@ -193,6 +215,10 @@ func (path *parsePath) errfExpect(tok *Token, format string, args ...interface{}
 	return expectFailed
 }
 
+func (path *parsePath) errfUnexpected(tok *Token, got, expected string) error {
+	return path.errfExpect(tok, "unexpected %s (expected %s)", got, expected)
+}
+
 func (path *parsePath) merge(other *parsePath) {
 	if other.offset > path.offset {
 		path.offset = other.offset
@@ -312,13 +338,13 @@ func recoverExpFail(ret **AstNode) {
 	}
 }
 
-func (path *parsePath) tryParse(fn parseFn, tok *Token) (ret *AstNode) {
+func tryParse(fn parseFn, tok *Token) (ret *AstNode) {
 	defer recoverExpFail(&ret)
 
 	return fn(tok)
 }
 
-func (path *parsePath) tryParseAs(fn parseAsFn, ast *AstNode) (ret *AstNode) {
+func tryParseAs(fn parseAsFn, ast *AstNode) (ret *AstNode) {
 	defer recoverExpFail(&ret)
 
 	return fn(ast)
@@ -582,7 +608,7 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	for _, p := range parsers {
 		newpath := path.an.newPath(path)
 
-		if ast := path.tryParse(p(newpath), tok); ast != nil {
+		if ast := tryParse(p(newpath), tok); ast != nil {
 			path.merge(newpath)
 			return ast
 		}
@@ -671,7 +697,7 @@ func (path *parsePath) parseMolecule(tok *Token) *AstNode {
 		for _, p := range parsers {
 			newpath := path.an.newPath(path)
 
-			if childAst := path.tryParseAs(p(path), prev); childAst != nil {
+			if childAst := tryParseAs(p(path), prev); childAst != nil {
 				prev = childAst
 				path.merge(newpath)
 				ast.Args = append(ast.Args, prev)
@@ -745,9 +771,11 @@ func (path *parsePath) parseExpr(tok *Token) *AstNode {
 	return path.parseArithExpr(tok, exprs, 0)
 }
 
-func (path *parsePath) parseKeyword(tok *Token, kw Keyword) *AstNode {
-	if kw != isKeyword(string(tok.Lexeme)) {
-		return nil
+func (path *parsePath) parseKeyword(tok *Token) *AstNode {
+	kw := isKeyword(string(tok.Lexeme))
+
+	if tok.Kind != NAME || kw == INVALID_KW {
+		panic(path.errfUnexpected(tok, tok.Kind.String(), NAME.String()))
 	}
 
 	switch kw {
@@ -761,18 +789,33 @@ func (path *parsePath) parseKeyword(tok *Token, kw Keyword) *AstNode {
 		return path.parseInlineSQF(tok)
 	}
 
-	panic(path.an.errUnexpectedLexeme("keyword", tok))
+	panic(path.errfUnexpected(tok, kw.String(), keywordsJoin()))
+}
+
+func (path *parsePath) parseVarDec(tok *Token) *AstNode {
+	return nil
+}
+
+func (path *parsePath) parseVarReassign(tok *Token) *AstNode {
+	return nil
 }
 
 func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
-	switch tok.Kind {
-	case NAME:
-		if kw := isKeyword(string(tok.Lexeme)); kw != INVALID_KW {
-			return path, path.parseKeyword(tok, kw), nil
+	parsers := []func(p *parsePath) parseFn{
+		func(p *parsePath) parseFn { return p.parseKeyword },
+		func(p *parsePath) parseFn { return p.parseVarDec },
+		func(p *parsePath) parseFn { return p.parseVarReassign },
+	}
+
+	for _, p := range parsers {
+		newpath := an.newPath(path)
+
+		if ast := tryParse(p(newpath), tok); ast != nil {
+			return newpath, ast, nil
 		}
 	}
 
-	return path, nil, path.an.errf(tok, "unable to parse")
+	return path, nil, path.errf(tok, "unable to parse")
 }
 
 func (an *Analyser) parseOne() (*AstNode, error) {
