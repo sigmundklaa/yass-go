@@ -19,12 +19,15 @@ const (
 	RETURN_TYPE
 	INLINE_SQF
 	CALL
-	LITERAL
+	TERMINAL
+	MOLECULE
 	ARRAY
 	DICT
 	DICT_ITEM
 	REFERENCE
 	REF_SEQUENCE
+	NAME_FULL
+	SLICE
 	ADDITION
 	SUBTRACTION
 	DIVISION
@@ -93,6 +96,9 @@ type parsePath struct {
 	stack  []*stackItem
 	errors []error
 }
+
+type parseAsFn func(*AstNode) *AstNode
+type parseFn func(*Token) *AstNode
 
 type Analyser struct {
 	eof              bool
@@ -260,13 +266,7 @@ func (path *parsePath) lookahead() *Token {
 	return path.an.buf[path.offset+1]
 }
 
-func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
-	tok, err := path.advance()
-
-	if err != nil {
-		panic(err)
-	}
-
+func (path *parsePath) expect(tok *Token, kinds ...LexKind) *Token {
 	for _, expect := range kinds {
 		if tok.Kind == expect {
 			return tok
@@ -274,6 +274,16 @@ func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
 	}
 
 	panic(path.errfExpect(tok, "unexpected %s (expected %s)", tok.Kind.String(), lexKindsJoin(kinds...)))
+}
+
+func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
+	tok, err := path.advance()
+
+	if err != nil {
+		panic(err)
+	}
+
+	return path.expect(tok, kinds...)
 }
 
 func (path *parsePath) mustTerminate() *Token {
@@ -292,16 +302,32 @@ func (path *parsePath) lookaheadIs(kinds ...LexKind) bool {
 	return false
 }
 
-func (path *parsePath) tryParse(fn func(*Token) *AstNode, tok *Token) (ret *AstNode) {
+func (path *parsePath) tryParse(fn parseFn, tok *Token) (ret *AstNode) {
 	defer func() {
 		if r := recover(); r != nil {
 			if r == expectFailed {
 				ret = nil
 			}
+
+			panic(r)
 		}
 	}()
 
 	return fn(tok)
+}
+
+func (path *parsePath) tryParseAs(fn parseAsFn, ast *AstNode) (ret *AstNode) {
+	defer func() {
+		if r := recover(); r != nil {
+			if r == expectFailed {
+				ret = nil
+			}
+
+			panic(r)
+		}
+	}()
+
+	return fn(ast)
 }
 
 /*******************************************************************
@@ -309,13 +335,11 @@ End helpers
 Begin parser functions
 *******************************************************************/
 
-type parseFn func(*Token) *AstNode
-
-func (path *parsePath) parseRefSequence(tok *Token) *AstNode {
+func (path *parsePath) parseNameSequence(tok *Token) *AstNode {
 	ast := &AstNode{
 		Kind:     REF_SEQUENCE,
 		Value:    nil,
-		Args:     []*AstNode{path.parseReference(tok)},
+		Args:     []*AstNode{path.parseNameFull(tok)},
 		Children: nil,
 	}
 
@@ -326,7 +350,7 @@ func (path *parsePath) parseRefSequence(tok *Token) *AstNode {
 			break
 		}
 
-		ast.Args = append(ast.Args, path.parseReference(path.mustAdvance()))
+		ast.Args = append(ast.Args, path.parseNameFull(path.mustAdvance()))
 	}
 
 	return ast
@@ -339,7 +363,7 @@ func (path *parsePath) parseModuleDec(tok *Token) *AstNode {
 	ast := &AstNode{
 		Kind:     MODULE,
 		Value:    nil,
-		Args:     []*AstNode{path.parseReference(path.mustAdvance())},
+		Args:     []*AstNode{path.parseNameFull(path.mustAdvance())},
 		Children: nil,
 	}
 
@@ -360,7 +384,7 @@ func (path *parsePath) parseClassDef(tok *Token) *AstNode {
 	ast := &AstNode{
 		Kind:     CLASS,
 		Value:    nil,
-		Args:     []*AstNode{path.parseReference(path.mustAdvance())}, // name
+		Args:     []*AstNode{path.parseNameFull(path.mustAdvance())}, // name
 		Children: nil,
 	}
 
@@ -368,7 +392,7 @@ func (path *parsePath) parseClassDef(tok *Token) *AstNode {
 
 	// Inherits
 	if nxt.Kind == PARAN_OPEN {
-		ast.Args = append(ast.Args, path.parseRefSequence(path.mustAdvance()))
+		ast.Args = append(ast.Args, path.parseNameSequence(path.mustAdvance()))
 		path.mustAdvanceExpect(PARAN_CLOSE)
 		path.mustAdvanceExpect(CURL_OPEN)
 	}
@@ -384,8 +408,8 @@ func (path *parsePath) parseFunctionParam(tok *Token) *AstNode {
 		Kind:  FUNC_PARAM,
 		Value: nil,
 		Args: []*AstNode{
-			path.parseReference(tok),                // type
-			path.parseReference(path.mustAdvance()), // name
+			path.parseNameFull(tok),                // type
+			path.parseNameFull(path.mustAdvance()), // name
 		},
 		Children: nil,
 	}
@@ -404,7 +428,7 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 	ast := &AstNode{
 		Kind:     FUNCTION,
 		Value:    nil,
-		Args:     []*AstNode{path.parseReference(path.mustAdvance())},
+		Args:     []*AstNode{path.parseNameFull(path.mustAdvance())}, // name
 		Children: nil,
 	}
 
@@ -427,7 +451,7 @@ func (path *parsePath) parseFunctionDef(tok *Token) *AstNode {
 		ast.Args = append(ast.Args, &AstNode{
 			Kind:     RETURN_TYPE,
 			Value:    nil,
-			Args:     []*AstNode{path.parseRefSequence(path.mustAdvance())},
+			Args:     []*AstNode{path.parseNameSequence(path.mustAdvance())},
 			Children: nil,
 		})
 		nxt = path.mustAdvanceExpect(COMMA, CURL_OPEN)
@@ -457,63 +481,39 @@ func (path *parsePath) parseInlineSQF(tok *Token) *AstNode {
 	return ast
 }
 
-// reference: NAME ("." NAME)*
-func (path *parsePath) parseReference(tok *Token) *AstNode {
-	if tok.Kind != NAME {
-		panic(path.errfExpect(tok, "fuck!"))
-	}
-
-	ast := &AstNode{
-		Kind:     REFERENCE,
-		Value:    []*Token{tok},
+func (path *parsePath) parseTerminal(tok *Token) *AstNode {
+	return &AstNode{
+		Kind:     TERMINAL,
+		Value:    []*Token{path.expect(tok, NUMBER, STRING, NAME)},
 		Args:     nil,
+		Children: nil,
+	}
+}
+
+func (path *parsePath) parseName(tok *Token) *AstNode {
+	return &AstNode{
+		Kind:     TERMINAL,
+		Value:    []*Token{path.expect(tok, NAME)},
+		Args:     nil,
+		Children: nil,
+	}
+}
+
+func (path *parsePath) parseNameFull(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind:     NAME_FULL,
+		Value:    nil,
+		Args:     []*AstNode{path.parseName(tok)},
 		Children: nil,
 	}
 
 	for path.lookaheadIs(PERIOD) {
 		path.mustAdvanceExpect(PERIOD)
 
-		ast.Value = append(ast.Value, path.mustAdvanceExpect(NAME))
+		ast.Args = append(ast.Args, path.parseName(path.mustAdvance()))
 	}
 
 	return ast
-}
-
-func (path *parsePath) parseCall(tok *Token) *AstNode {
-	ast := &AstNode{
-		Kind:     CALL,
-		Value:    nil,
-		Args:     []*AstNode{path.parseReference(tok)},
-		Children: nil,
-	}
-
-	nxt := path.mustAdvanceExpect(PARAN_OPEN)
-
-	for nxt.Kind != PARAN_CLOSE {
-		ast.Args = append(ast.Args, path.parseExpr(path.mustAdvance()))
-		nxt = path.mustAdvanceExpect(COMMA, PARAN_CLOSE)
-
-		if nxt.Kind == COMMA && path.lookaheadIs(PARAN_CLOSE) {
-			path.mustAdvanceExpect(PARAN_CLOSE)
-			break
-		}
-	}
-
-	return ast
-}
-
-func (path *parsePath) parseSlice(tok *Token) *AstNode {
-
-	return nil
-}
-
-func (path *parsePath) parseLiteral(tok *Token) *AstNode {
-	return &AstNode{
-		Kind:     LITERAL,
-		Value:    []*Token{path.mustAdvanceExpect(NUMBER, STRING)},
-		Args:     nil,
-		Children: nil,
-	}
 }
 
 func (path *parsePath) parseArray(tok *Token) *AstNode {
@@ -577,13 +577,10 @@ func (path *parsePath) parseDict(tok *Token) *AstNode {
 	return ast
 }
 
-// atom: reference | call | NUMBER | string | array | dict | bool | index
+// atom: NUMBER | string | array | dict | bool
 func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	parsers := []func(*parsePath) parseFn{
-		func(p *parsePath) parseFn { return p.parseCall },
-		func(p *parsePath) parseFn { return p.parseSlice },
-		func(p *parsePath) parseFn { return p.parseReference },
-		func(p *parsePath) parseFn { return p.parseLiteral },
+		func(p *parsePath) parseFn { return p.parseTerminal },
 		func(p *parsePath) parseFn { return p.parseArray },
 		func(p *parsePath) parseFn { return p.parseDict },
 	}
@@ -600,6 +597,104 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	panic(path.errf(tok, "oh?"))
 }
 
+func (path *parsePath) parseAsAtom(prev *AstNode) *AstNode {
+	return path.parseAtom(path.mustAdvance())
+}
+
+// reference: NAME ("." NAME)*
+func (path *parsePath) parseAsReference(prev *AstNode) *AstNode {
+	ast := &AstNode{
+		Kind:     REFERENCE,
+		Value:    nil,
+		Args:     []*AstNode{prev},
+		Children: nil,
+	}
+
+	path.mustAdvanceExpect(PERIOD)
+	ast.Args = append(ast.Args, path.parseMolecule(path.mustAdvance()))
+
+	return ast
+}
+
+func (path *parsePath) parseAsCall(prev *AstNode) *AstNode {
+	ast := &AstNode{
+		Kind:     CALL,
+		Value:    nil,
+		Args:     []*AstNode{prev},
+		Children: nil,
+	}
+
+	nxt := path.mustAdvanceExpect(PARAN_OPEN)
+
+	for nxt.Kind != PARAN_CLOSE {
+		ast.Args = append(ast.Args, path.parseExpr(path.mustAdvance()))
+		nxt = path.mustAdvanceExpect(COMMA, PARAN_CLOSE)
+
+		if nxt.Kind == COMMA && path.lookaheadIs(PARAN_CLOSE) {
+			path.mustAdvanceExpect(PARAN_CLOSE)
+			break
+		}
+	}
+
+	return ast
+}
+
+func (path *parsePath) parseAsSlice(prev *AstNode) *AstNode {
+	ast := &AstNode{
+		Kind:     SLICE,
+		Value:    nil,
+		Args:     []*AstNode{prev},
+		Children: nil,
+	}
+
+	path.mustAdvanceExpect(SQBRAC_OPEN)
+
+	// TODO: SLICE
+
+	return ast
+}
+
+// molecule: molecule "(" [expr ("," expr)* [","]] ")"
+// 		|	 molecule "[" slice "]"
+// 		| 	 atom
+func (path *parsePath) parseMolecule(tok *Token) *AstNode {
+	parsers := []func(*parsePath) parseAsFn{
+		func(p *parsePath) parseAsFn { return p.parseAsCall },
+		func(p *parsePath) parseAsFn { return p.parseAsSlice },
+		func(p *parsePath) parseAsFn { return p.parseAsReference },
+	}
+
+	ast := &AstNode{
+		Kind:     MOLECULE,
+		Value:    nil,
+		Args:     nil,
+		Children: nil,
+	}
+
+	prev := path.parseAtom(tok)
+
+	for notFound := false; !notFound; {
+		for _, p := range parsers {
+			newpath := path.an.newPath(path)
+
+			if childAst := path.tryParseAs(p(path), prev); childAst != nil {
+				prev = childAst
+				path.merge(newpath)
+				ast.Args = append(ast.Args, prev)
+				break
+			}
+
+			notFound = true
+		}
+	}
+
+	if len(ast.Args) == 0 {
+		ast.Args = append(ast.Args, prev)
+	}
+
+	return ast
+}
+
 type arithExpr struct {
 	operand LexKind
 	output  AstKind
@@ -612,7 +707,7 @@ func (path *parsePath) parseArithExpr(tok *Token, exprs []*arithExpr, idx int) *
 
 	// last iteration
 	if idx >= len(exprs)-1 {
-		nxtGetter = path.parseAtom
+		nxtGetter = path.parseMolecule
 	}
 
 	expr := exprs[idx]
