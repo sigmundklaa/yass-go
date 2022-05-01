@@ -19,6 +19,15 @@ const (
 	FUNC_PARAM
 	RETURN_TYPE
 	INLINE_SQF
+	VAR_DEC
+	UNPACK
+	PACK
+	VAR_ASSIGN
+	VAR_ADDASSIGN
+	VAR_SUBASSIGN
+	VAR_MULASSIGN
+	VAR_DIVASSIGN
+	VAR_MODASSIGN
 	CALL
 	TERMINAL
 	MOLECULE
@@ -40,6 +49,17 @@ var ignoreKinds = map[LexKind]bool{
 	COMMENT_ML:  true,
 	COMMENT_SL:  true,
 	SPACE_NO_NL: true,
+}
+
+var terminators = []LexKind{
+	SEMICOLON,
+	NEWLINE,
+}
+
+func packWithTerminators(kinds ...LexKind) []LexKind {
+	kinds = append(kinds, terminators...)
+
+	return kinds
 }
 
 type Keyword int
@@ -313,7 +333,7 @@ func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
 }
 
 func (path *parsePath) mustTerminate() *Token {
-	return path.mustAdvanceExpect(NEWLINE, SEMICOLON)
+	return path.mustAdvanceExpect(terminators...)
 }
 
 func (path *parsePath) lookaheadIs(kinds ...LexKind) bool {
@@ -387,7 +407,7 @@ func (path *parsePath) parseModuleDec(tok *Token) *AstNode {
 		Children: nil,
 	}
 
-	nxt := path.mustAdvanceExpect(CURL_OPEN, SEMICOLON, NEWLINE)
+	nxt := path.mustAdvanceExpect(packWithTerminators(CURL_OPEN)...)
 
 	if nxt.Kind == CURL_OPEN {
 		stackPush(&path.stack, ast, CURL_CLOSE)
@@ -771,7 +791,7 @@ func (path *parsePath) parseExpr(tok *Token) *AstNode {
 	return path.parseArithExpr(tok, exprs, 0)
 }
 
-func (path *parsePath) parseKeyword(tok *Token) *AstNode {
+func (path *parsePath) parseCompound(tok *Token) *AstNode {
 	kw := isKeyword(string(tok.Lexeme))
 
 	if tok.Kind != NAME || kw == INVALID_KW {
@@ -792,19 +812,72 @@ func (path *parsePath) parseKeyword(tok *Token) *AstNode {
 	panic(path.errfUnexpected(tok, kw.String(), keywordsJoin()))
 }
 
-func (path *parsePath) parseVarDec(tok *Token) *AstNode {
-	return nil
+func (path *parsePath) parsePack(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind: UNPACK,
+		Args: []*AstNode{
+			path.parseExpr(tok),
+		},
+	}
+
+	for path.lookaheadIs(COMMA) {
+		path.mustAdvanceExpect(COMMA)
+
+		if !path.lookaheadIs(NAME) {
+			break
+		}
+
+		ast.Args = append(ast.Args, path.parseExpr(path.mustAdvance()))
+	}
+
+	return ast
 }
 
-func (path *parsePath) parseVarReassign(tok *Token) *AstNode {
-	return nil
+func (path *parsePath) parseUnpack(tok *Token) *AstNode {
+	ast := path.parsePack(tok)
+	ast.Kind = UNPACK
+
+	return ast
+}
+
+func (path *parsePath) parseVarDec(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind: VAR_DEC,
+		Args: []*AstNode{
+			path.parseNameFull(tok),              // type
+			path.parseUnpack(path.mustAdvance()), // name (can be slices, function calls(?) etc)
+		},
+	}
+
+	nxt := path.mustAdvanceExpect(packWithTerminators(ASSIGN)...)
+
+	if nxt.Kind == ASSIGN {
+		ast.Args = append(ast.Args, path.parsePack(path.mustAdvance()))
+		path.mustTerminate()
+	}
+
+	return ast
+}
+
+func (path *parsePath) parseVarAssign(tok *Token) *AstNode {
+	ast := &AstNode{
+		Kind: VAR_ASSIGN,
+		Args: []*AstNode{path.parseUnpack(tok)},
+	}
+
+	path.mustAdvanceExpect(ASSIGN)
+	ast.Args = append(ast.Args, path.parsePack(path.mustAdvance()))
+
+	path.mustTerminate()
+
+	return ast
 }
 
 func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
 	parsers := []func(p *parsePath) parseFn{
-		func(p *parsePath) parseFn { return p.parseKeyword },
+		func(p *parsePath) parseFn { return p.parseCompound },
 		func(p *parsePath) parseFn { return p.parseVarDec },
-		func(p *parsePath) parseFn { return p.parseVarReassign },
+		func(p *parsePath) parseFn { return p.parseVarAssign },
 	}
 
 	for _, p := range parsers {
