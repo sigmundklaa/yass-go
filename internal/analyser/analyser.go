@@ -38,6 +38,9 @@ const (
 	NAME_SEQUENCE
 	NAME_FULL
 	SLICE
+	RSLICE
+	LSLICE
+	INDEX
 	ADDITION
 	SUBTRACTION
 	DIVISION
@@ -294,6 +297,21 @@ func stackPop(stack *[]*stackItem) *AstNode {
 	*stack = (*stack)[:len(*stack)-1]
 
 	return itm.ast
+}
+
+func (path *parsePath) addChild(ast *AstNode) {
+	stack := path.stack
+
+	if len(stack) < 1 {
+		stack = path.an.stack
+
+		if len(stack) < 1 {
+			panic(fmt.Errorf("no path children"))
+		}
+	}
+
+	itm := stack[len(stack)-1]
+	itm.ast.Args = append(itm.ast.Args, ast)
 }
 
 func (path *parsePath) current() *Token {
@@ -689,7 +707,32 @@ func (path *parsePath) parseAsSlice(prev *AstNode) *AstNode {
 
 	path.mustAdvanceExpect(SQBRAC_OPEN)
 
-	// TODO: SLICE
+	nxt := path.mustAdvance()
+
+	if nxt.Kind == COLON {
+		ast.Kind = RSLICE
+		ast.Args = append(ast.Args, path.parseExpr(path.mustAdvance()))
+
+		path.mustAdvanceExpect(SQBRAC_CLOSE)
+	} else if nxt.Kind != SQBRAC_CLOSE {
+		ast.Args = append(ast.Args, path.parseExpr(nxt))
+
+		nxt := path.mustAdvanceExpect(COLON, SQBRAC_CLOSE)
+
+		if nxt.Kind == COLON {
+			nxt := path.mustAdvance()
+
+			if nxt.Kind == SQBRAC_CLOSE {
+				ast.Kind = LSLICE
+			} else {
+				ast.Args = append(ast.Args, path.parseExpr(nxt))
+
+				path.mustAdvanceExpect(SQBRAC_CLOSE)
+			}
+		} else {
+			ast.Kind = INDEX
+		}
+	}
 
 	return ast
 }
@@ -884,6 +927,7 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 		newpath := an.newPath(path)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
+			path.addChild(ast)
 			return newpath, ast, nil
 		}
 	}
