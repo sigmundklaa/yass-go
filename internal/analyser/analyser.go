@@ -917,7 +917,7 @@ func (path *parsePath) parseCompound(tok *Token) *AstNode {
 
 func (path *parsePath) parsePack(tok *Token) *AstNode {
 	ast := &AstNode{
-		Kind: UNPACK,
+		Kind: PACK,
 		Children: []*AstNode{
 			path.parseExpr(tok),
 		},
