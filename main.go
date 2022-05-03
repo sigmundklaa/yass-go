@@ -10,7 +10,7 @@ import (
 
 func testLex() {
 	pattern := analyser.DefaultPattern()
-	f, err := os.Open("examples.githide/api/api.yass")
+	f, err := os.Open("examples/one.ys")
 
 	if err != nil {
 		panic(err)
@@ -38,10 +38,38 @@ func testLex() {
 
 }
 
+func printIndent(indent int) {
+	for i := 0; i < indent; i++ {
+		fmt.Printf(" ")
+	}
+}
+
+func printAst(ast *analyser.AstNode, indent int) {
+	printIndent(indent)
+	fmt.Printf("%s\n", ast.Kind.String())
+
+	for _, v := range ast.Children {
+		printAst(v, indent+4)
+	}
+}
+
 func testParse() {
-	//fmt.Println(analyser.TestStates())
+	f, err := os.Open("examples/one.ys")
+
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	an := analyser.NewAnalyser(reader)
+
+	for _, v := range an.Parse()[:1] {
+		// fmt.Printf("%s\n", v.String())
+		printAst(v, 0)
+	}
 }
 
 func main() {
-	testLex()
+	testParse()
 }

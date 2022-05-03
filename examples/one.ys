@@ -1,0 +1,9 @@
+
+module one
+
+fn testFn(string arg1, int arg2, int arg3 = 4): string {
+    string x = "fizz"
+    x = "buzz"
+
+    int y = 2 + 5
+}

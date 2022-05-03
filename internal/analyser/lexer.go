@@ -92,7 +92,7 @@ var defaultPattern = map[LexKind]string{
 	SEMICOLON:    ";",
 	COLON:        ":",
 	ASSIGN:       "=",
-	PLUS:         "+",
+	PLUS:         "\\+",
 	MINUS:        "-",
 	SLASH:        "\\/",
 	STAR:         "\\*",

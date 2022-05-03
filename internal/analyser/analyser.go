@@ -48,6 +48,46 @@ const (
 	MODULO
 )
 
+var astKindStrings = map[AstKind]string{
+	MODULE:         "MODULE",
+	CLASS:          "CLASS",
+	FUNCTION:       "FUNCTION",
+	FUNC_PARAM:     "FUNC_PARAM",
+	RETURN_TYPE:    "RETURN_TYPE",
+	INLINE_SQF:     "INLINE_SQF",
+	VAR_DEC:        "VAR_DEC",
+	UNPACK:         "UNPACK",
+	PACK:           "PACK",
+	VAR_ASSIGN:     "VAR_ASSIGN",
+	VAR_ADDASSIGN:  "VAR_ADDASSIGN",
+	VAR_SUBASSIGN:  "VAR_SUBASSIGN",
+	VAR_MULASSIGN:  "VAR_MULASSIGN",
+	VAR_DIVASSIGN:  "VAR_DIVASSIGN",
+	VAR_MODASSIGN:  "VAR_MODASSIGN",
+	CALL:           "CALL",
+	TERMINAL:       "TERMINAL",
+	MOLECULE:       "MOLECULE",
+	ARRAY:          "ARRAY",
+	DICT:           "DICT",
+	DICT_ITEM:      "DICT_ITEM",
+	REFERENCE:      "REFERENCE",
+	NAME_SEQUENCE:  "NAME_SEQUENCE",
+	NAME_FULL:      "NAME_FULL",
+	SLICE:          "SLICE",
+	RSLICE:         "RSLICE",
+	LSLICE:         "LSLICE",
+	INDEX:          "INDEX",
+	ADDITION:       "ADDITION",
+	SUBTRACTION:    "SUBTRACTION",
+	DIVISION:       "DIVISION",
+	MULTIPLICATION: "MULTIPLICATION",
+	MODULO:         "MODULO",
+}
+
+func (k AstKind) String() string {
+	return astKindStrings[k]
+}
+
 var ignoreKinds = map[LexKind]bool{
 	COMMENT_ML:  true,
 	COMMENT_SL:  true,
@@ -128,6 +168,45 @@ type AstNode struct {
 	Children []*AstNode
 }
 
+func astArrJoin(asts []*AstNode) string {
+	var astb strings.Builder
+
+	comma := false
+	for _, v := range asts {
+		if comma {
+			astb.WriteRune(',')
+		} else {
+			comma = true
+		}
+
+		astb.WriteString(v.String())
+	}
+
+	return astb.String()
+}
+
+func (ast *AstNode) String() string {
+	var tokb strings.Builder
+
+	comma := false
+	for _, v := range ast.Value {
+		if comma {
+			tokb.WriteRune(',')
+		} else {
+			comma = true
+		}
+
+		tokb.WriteString(v.String())
+	}
+
+	return fmt.Sprintf(
+		"<AstNode: {%s, [%s], [%s]}>",
+		ast.Kind.String(),
+		tokb.String(),
+		astArrJoin(ast.Children),
+	)
+}
+
 type stackItem struct {
 	ast    *AstNode
 	closer LexKind
@@ -162,18 +241,6 @@ func NewAnalyser(reader io.RuneReader) *Analyser {
 	}
 }
 
-func (an *Analyser) errf(tok *Token, format string, args ...interface{}) error {
-	return errhandler.Err("analyser", fmt.Sprintf(format, args...), tok.Line, tok.Col)
-}
-
-func (an *Analyser) errUnexpectedKind(expected string, got *Token) error {
-	return an.errf(got, "unexpected token type: expected (%s), got: %s", expected, got.Kind.String())
-}
-
-func (an *Analyser) errUnexpectedLexeme(expected string, got *Token) error {
-	return an.errf(got, "unexpected token value: expected (%s), got: %s", expected, string(got.Lexeme))
-}
-
 func (an *Analyser) newPath(base *parsePath) *parsePath {
 	path := &parsePath{
 		eof:    false,
@@ -190,7 +257,8 @@ func (an *Analyser) newPath(base *parsePath) *parsePath {
 	return path
 }
 
-func (an *Analyser) selectPath(path *parsePath) {
+func (an *Analyser) selectPath(pathaddr **parsePath) {
+	path := *pathaddr
 	an.buf = an.buf[path.offset:]
 	an.eof = an.eof || path.eof
 	an.stack = append(an.stack, path.stack...)
@@ -212,14 +280,16 @@ func (an *Analyser) nextValidToken() (nxt *Token, err error) {
 	}
 }
 
-func (an *Analyser) fillBuf() error {
-	tok, err := an.nextValidToken()
+func (an *Analyser) fillBuf(sz int) error {
+	for i := 0; i < sz; i++ {
+		tok, err := an.nextValidToken()
 
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+
+		an.buf = append(an.buf, tok)
 	}
-
-	an.buf = append(an.buf, tok)
 
 	return nil
 }
@@ -260,7 +330,7 @@ func (path *parsePath) advance() (*Token, error) {
 	var err error
 
 	if path.lookahead() == nil {
-		err = path.an.fillBuf()
+		err = path.an.fillBuf(1)
 
 		if err != nil {
 			return nil, err
@@ -305,7 +375,7 @@ func (path *parsePath) addChild(ast *AstNode) {
 		stack = path.an.stack
 
 		if len(stack) < 1 {
-			panic(fmt.Errorf("no path children"))
+			return
 		}
 	}
 
@@ -314,16 +384,24 @@ func (path *parsePath) addChild(ast *AstNode) {
 }
 
 func (path *parsePath) current() *Token {
-	if path.offset >= len(path.an.buf) {
-		return nil
+	if diff := path.offset - (len(path.an.buf) - 1); diff > 0 {
+		err := path.an.fillBuf(diff)
+
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return path.an.buf[path.offset]
 }
 
 func (path *parsePath) lookahead() *Token {
-	if path.offset+1 >= len(path.an.buf) {
-		return nil
+	if diff := path.offset + 1 - (len(path.an.buf) - 1); diff > 0 {
+		err := path.an.fillBuf(diff + 1)
+
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return path.an.buf[path.offset+1]
@@ -336,7 +414,7 @@ func (path *parsePath) expect(tok *Token, kinds ...LexKind) *Token {
 		}
 	}
 
-	panic(path.errfExpect(tok, "unexpected %s (expected %s)", tok.Kind.String(), lexKindsJoin(kinds...)))
+	panic(path.errfUnexpected(tok, tok.Kind.String(), lexKindsJoin(kinds...)))
 }
 
 func (path *parsePath) mustAdvanceExpect(kinds ...LexKind) *Token {
@@ -469,7 +547,7 @@ func (path *parsePath) parseFunctionParam(tok *Token) *AstNode {
 
 	if path.lookaheadIs(ASSIGN) {
 		path.mustAdvanceExpect(ASSIGN)
-		ast.Children = append(ast.Children, path.parseExpr(nil))
+		ast.Children = append(ast.Children, path.parseExpr(path.mustAdvance()))
 	}
 
 	return ast
@@ -638,7 +716,7 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 		}
 	}
 
-	panic(path.errf(tok, "oh?"))
+	panic(path.errfUnexpected(tok, "atom", "not atom :D"))
 }
 
 func (path *parsePath) parseAsAtom(prev *AstNode) *AstNode {
@@ -739,17 +817,18 @@ func (path *parsePath) parseMolecule(tok *Token) *AstNode {
 	prev := path.parseAtom(tok)
 
 	for notFound := false; !notFound; {
+		notFound = true
 		for _, p := range parsers {
 			newpath := path.an.newPath(path)
 
-			if childAst := tryParseAs(p(path), prev); childAst != nil {
+			if childAst := tryParseAs(p(newpath), prev); childAst != nil {
+				notFound = false
+
 				prev = childAst
 				path.merge(newpath)
 				ast.Children = append(ast.Children, prev)
 				break
 			}
-
-			notFound = true
 		}
 	}
 
@@ -908,6 +987,8 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 		newpath := an.newPath(path)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
+			// we add to path because newpath might contain a new stack item,
+			// meaning if we add a child, the ast becomes its own parent/child
 			path.addChild(ast)
 			return newpath, ast, nil
 		}
@@ -918,7 +999,8 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 
 func (an *Analyser) parseOne() (*AstNode, error) {
 	path := an.newPath(nil)
-	defer an.selectPath(path)
+	pathaddr := &path
+	defer an.selectPath(pathaddr)
 
 	nxt, err := path.advance()
 
@@ -929,16 +1011,16 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 
 		if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
 			stackPop(&an.stack)
-		}
-
-		if !(nxt.Kind == SEMICOLON || nxt.Kind == NEWLINE) {
+		} else if !(nxt.Kind == SEMICOLON || nxt.Kind == NEWLINE) {
 			break
 		}
 
 		nxt, err = path.advance()
 	}
 
-	path, ast, err := an.parseTok(path, nxt)
+	var ast *AstNode
+	path, ast, err = an.parseTok(path, nxt)
+	*pathaddr = path
 
 	if err != nil {
 		return nil, err
