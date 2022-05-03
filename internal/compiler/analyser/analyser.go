@@ -311,6 +311,29 @@ func (path *parsePath) errfUnexpected(tok *Token, got, expected string) error {
 	return path.errfExpect(tok, "unexpected %s (expected %s)", got, expected)
 }
 
+func selectErrorPath(paths []*parsePath) *parsePath {
+	if len(paths) < 1 {
+		return nil
+	}
+
+	p := paths[0]
+	for _, v := range paths {
+		if v.offset > p.offset {
+			p = v
+		}
+	}
+
+	return p
+}
+
+func (path *parsePath) selectError() error {
+	if length := len(path.errors); length > 0 {
+		return path.errors[length-1]
+	}
+
+	return nil
+}
+
 func (path *parsePath) merge(other *parsePath) {
 	if other.offset > path.offset {
 		path.offset = other.offset
@@ -326,19 +349,8 @@ func (path *parsePath) advance() (*Token, error) {
 		return nil, io.EOF
 	}
 
-	var token *Token
-	var err error
-
-	if path.lookahead() == nil {
-		err = path.an.fillBuf(1)
-
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	path.offset += 1
-	token = path.current()
+	token := path.current()
 
 	if token.Kind == EOF {
 		path.eof = true
@@ -707,12 +719,23 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 		func(p *parsePath) parseFn { return p.parseDict },
 	}
 
+	paths := []*parsePath{}
+
 	for _, p := range parsers {
 		newpath := path.an.newPath(path)
+		paths = append(paths, newpath)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
 			path.merge(newpath)
 			return ast
+		}
+	}
+
+	errpath := selectErrorPath(paths)
+
+	if errpath != nil {
+		if err := errpath.selectError(); err != nil {
+			panic(err)
 		}
 	}
 
@@ -983,8 +1006,11 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 		func(p *parsePath) parseFn { return p.parseVarAssign },
 	}
 
+	paths := []*parsePath{}
+
 	for _, p := range parsers {
 		newpath := an.newPath(path)
+		paths = append(paths, newpath)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
 			// we add to path because newpath might contain a new stack item,
@@ -994,7 +1020,14 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 		}
 	}
 
-	return path, nil, path.errf(tok, "unable to parse")
+	errpath := selectErrorPath(paths)
+	err := path.errf(tok, "unable to parse")
+
+	if errpath != nil {
+		path = errpath
+	}
+
+	return path, nil, err
 }
 
 func (an *Analyser) parseOne() (*AstNode, error) {
@@ -1023,6 +1056,10 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 	*pathaddr = path
 
 	if err != nil {
+		if tmp := path.selectError(); tmp != nil {
+			return nil, tmp
+		}
+
 		return nil, err
 	}
 
@@ -1047,5 +1084,28 @@ func (an *Analyser) Parse() []*AstNode {
 			nodes = append(nodes, nxt)
 		}
 	}
+
+	if length := len(an.stack); length > 0 {
+		var sbuilder strings.Builder
+
+		comma := true
+		for i := length; i >= 0; i-- {
+			v := an.stack[i]
+
+			if comma {
+				sbuilder.WriteRune(',')
+			} else {
+				comma = false
+			}
+
+			sbuilder.WriteString(v.closer.String())
+		}
+
+		panic(fmt.Errorf(
+			"unexpected EOF (expected %s (respectively))",
+			sbuilder.String(),
+		))
+	}
+
 	return nodes
 }
