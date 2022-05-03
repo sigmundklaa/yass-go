@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/SigJig/yass-go/internal/errhandler"
+	"github.com/SigJig/yass-go/internal/compiler/errhandler"
 )
 
 type LexKind int

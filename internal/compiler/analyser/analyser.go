@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/SigJig/yass-go/internal/errhandler"
+	"github.com/SigJig/yass-go/internal/compiler/errhandler"
 )
 
 var expectFailed error

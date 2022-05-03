@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/SigJig/yass-go/internal/analyser"
+	"github.com/SigJig/yass-go/internal/compiler/analyser"
 )
 
 func testLex() {
