@@ -1,5 +1,7 @@
 package types
 
+type Callable interface{}
+
 type Parameter struct {
 	Type    TypeIface
 	Name    string
@@ -9,17 +11,17 @@ type Parameter struct {
 type NamedFunction struct {
 	Name       string
 	Parameters []*Parameter
-	Returns    []TypeIface
+	Returns    *Pack
 	Body       []StmtIface
 }
 
 type AnonFunction struct {
 	Parameters []*Parameter
-	Returns    []TypeIface
+	Returns    *Pack
 	Body       []StmtIface
 }
 
 type FunctionCall struct {
-	Function interface{}
+	Function Callable
 	Args     []*Expression
 }

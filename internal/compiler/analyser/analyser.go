@@ -14,6 +14,8 @@ type AstKind int
 
 const (
 	MODULE AstKind = iota
+	IMPORT
+	IMPORT_PARTIAL
 	CLASS
 	FUNCTION
 	FUNC_PARAM
@@ -50,6 +52,8 @@ const (
 
 var astKindStrings = map[AstKind]string{
 	MODULE:         "MODULE",
+	IMPORT:         "IMPORT",
+	IMPORT_PARTIAL: "IMPORT_PARTIAL",
 	CLASS:          "CLASS",
 	FUNCTION:       "FUNCTION",
 	FUNC_PARAM:     "FUNC_PARAM",
