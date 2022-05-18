@@ -1,4 +1,4 @@
-package analyser
+package compiler
 
 import "github.com/SigJig/yass-go/internal/compiler/types"
 

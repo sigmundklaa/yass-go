@@ -1,6 +1,7 @@
-package analyser
+package compiler
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -330,9 +331,15 @@ func selectErrorPath(paths []*parsePath) *parsePath {
 	return p
 }
 
-func (path *parsePath) selectError() error {
+func (path *parsePath) makeError() error {
 	if length := len(path.errors); length > 0 {
-		return path.errors[length-1]
+		var builder strings.Builder
+
+		for _, e := range path.errors {
+			fmt.Println(e)
+		}
+
+		return errors.New(builder.String())
 	}
 
 	return nil
@@ -738,8 +745,9 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	errpath := selectErrorPath(paths)
 
 	if errpath != nil {
-		if err := errpath.selectError(); err != nil {
-			panic(err)
+		if err := errpath.makeError(); err != nil {
+			// TODO: Fix this, should panic unexpected (?)
+			//panic(err)
 		}
 	}
 
@@ -1060,7 +1068,7 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 	*pathaddr = path
 
 	if err != nil {
-		if tmp := path.selectError(); tmp != nil {
+		if tmp := path.makeError(); tmp != nil {
 			return nil, tmp
 		}
 

@@ -1,4 +1,4 @@
-package analyser
+package compiler
 
 import (
 	"fmt"
