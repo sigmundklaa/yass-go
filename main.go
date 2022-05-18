@@ -62,7 +62,7 @@ func testParse() {
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
-	an := compiler.NewAnalyser(reader)
+	an := compiler.NewParser(reader)
 
 	for _, v := range an.Parse()[:1] {
 		// fmt.Printf("%s\n", v.String())

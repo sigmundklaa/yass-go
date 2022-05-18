@@ -68,7 +68,7 @@ func (gen *Generator) genOne(ast *AstNode) error {
 	return nil
 }
 
-func (gen *Generator) Generate(parser *Analyser) {
+func (gen *Generator) Generate(parser *Parser) {
 	nodes := parser.Parse()
 
 	for _, n := range nodes {

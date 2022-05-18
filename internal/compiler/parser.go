@@ -220,7 +220,7 @@ type stackItem struct {
 type parsePath struct {
 	eof    bool
 	offset int
-	an     *Analyser
+	par    *Parser
 	stack  []*stackItem
 	errors []error
 }
@@ -228,7 +228,7 @@ type parsePath struct {
 type parseAsFn func(*AstNode) *AstNode
 type parseFn func(*Token) *AstNode
 
-type Analyser struct {
+type Parser struct {
 	eof              bool
 	lexer            *Lexer
 	stack            []*stackItem
@@ -236,8 +236,8 @@ type Analyser struct {
 	buf              []*Token
 }
 
-func NewAnalyser(reader io.RuneReader) *Analyser {
-	return &Analyser{
+func NewParser(reader io.RuneReader) *Parser {
+	return &Parser{
 		eof:       false,
 		lexer:     DefaultLexer(reader),
 		token:     nil,
@@ -246,11 +246,11 @@ func NewAnalyser(reader io.RuneReader) *Analyser {
 	}
 }
 
-func (an *Analyser) newPath(base *parsePath) *parsePath {
+func (par *Parser) newPath(base *parsePath) *parsePath {
 	path := &parsePath{
 		eof:    false,
 		offset: 0,
-		an:     an,
+		par:    par,
 		stack:  nil,
 	}
 
@@ -262,18 +262,18 @@ func (an *Analyser) newPath(base *parsePath) *parsePath {
 	return path
 }
 
-func (an *Analyser) selectPath(pathaddr **parsePath) {
+func (par *Parser) selectPath(pathaddr **parsePath) {
 	path := *pathaddr
-	an.buf = an.buf[path.offset:]
-	an.eof = an.eof || path.eof
-	an.stack = append(an.stack, path.stack...)
+	par.buf = par.buf[path.offset:]
+	par.eof = par.eof || path.eof
+	par.stack = append(par.stack, path.stack...)
 
 	//return path.ast
 }
 
-func (an *Analyser) nextValidToken() (nxt *Token, err error) {
+func (par *Parser) nextValidToken() (nxt *Token, err error) {
 	for {
-		nxt, err = an.lexer.NextToken()
+		nxt, err = par.lexer.NextToken()
 
 		if err != nil {
 			return nil, err
@@ -285,22 +285,22 @@ func (an *Analyser) nextValidToken() (nxt *Token, err error) {
 	}
 }
 
-func (an *Analyser) fillBuf(sz int) error {
+func (par *Parser) fillBuf(sz int) error {
 	for i := 0; i < sz; i++ {
-		tok, err := an.nextValidToken()
+		tok, err := par.nextValidToken()
 
 		if err != nil {
 			return err
 		}
 
-		an.buf = append(an.buf, tok)
+		par.buf = append(par.buf, tok)
 	}
 
 	return nil
 }
 
 func (path *parsePath) errf(tok *Token, format string, args ...interface{}) error {
-	e := errhandler.Err("analyser", fmt.Sprintf(format, args...), tok.Line, tok.Col)
+	e := errhandler.Err("Parser", fmt.Sprintf(format, args...), tok.Line, tok.Col)
 	path.errors = append(path.errors, e)
 
 	return e
@@ -395,7 +395,7 @@ func (path *parsePath) addChild(ast *AstNode) {
 	stack := path.stack
 
 	if len(stack) < 1 {
-		stack = path.an.stack
+		stack = path.par.stack
 
 		if len(stack) < 1 {
 			return
@@ -407,27 +407,27 @@ func (path *parsePath) addChild(ast *AstNode) {
 }
 
 func (path *parsePath) current() *Token {
-	if diff := path.offset - (len(path.an.buf) - 1); diff > 0 {
-		err := path.an.fillBuf(diff)
+	if diff := path.offset - (len(path.par.buf) - 1); diff > 0 {
+		err := path.par.fillBuf(diff)
 
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	return path.an.buf[path.offset]
+	return path.par.buf[path.offset]
 }
 
 func (path *parsePath) lookahead() *Token {
-	if diff := path.offset + 1 - (len(path.an.buf) - 1); diff > 0 {
-		err := path.an.fillBuf(diff + 1)
+	if diff := path.offset + 1 - (len(path.par.buf) - 1); diff > 0 {
+		err := path.par.fillBuf(diff + 1)
 
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	return path.an.buf[path.offset+1]
+	return path.par.buf[path.offset+1]
 }
 
 func (path *parsePath) expect(tok *Token, kinds ...LexKind) *Token {
@@ -733,7 +733,7 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 	paths := []*parsePath{}
 
 	for _, p := range parsers {
-		newpath := path.an.newPath(path)
+		newpath := path.par.newPath(path)
 		paths = append(paths, newpath)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
@@ -854,7 +854,7 @@ func (path *parsePath) parseMolecule(tok *Token) *AstNode {
 	for notFound := false; !notFound; {
 		notFound = true
 		for _, p := range parsers {
-			newpath := path.an.newPath(path)
+			newpath := path.par.newPath(path)
 
 			if childAst := tryParseAs(p(newpath), prev); childAst != nil {
 				notFound = false
@@ -1011,7 +1011,7 @@ func (path *parsePath) parseVarAssign(tok *Token) *AstNode {
 	return ast
 }
 
-func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
+func (par *Parser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, error) {
 	parsers := []func(p *parsePath) parseFn{
 		func(p *parsePath) parseFn { return p.parseCompound },
 		func(p *parsePath) parseFn { return p.parseVarDec },
@@ -1021,7 +1021,7 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 	paths := []*parsePath{}
 
 	for _, p := range parsers {
-		newpath := an.newPath(path)
+		newpath := par.newPath(path)
 		paths = append(paths, newpath)
 
 		if ast := tryParse(p(newpath), tok); ast != nil {
@@ -1042,10 +1042,10 @@ func (an *Analyser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode,
 	return path, nil, err
 }
 
-func (an *Analyser) parseOne() (*AstNode, error) {
-	path := an.newPath(nil)
+func (par *Parser) parseOne() (*AstNode, error) {
+	path := par.newPath(nil)
 	pathaddr := &path
-	defer an.selectPath(pathaddr)
+	defer par.selectPath(pathaddr)
 
 	nxt, err := path.advance()
 
@@ -1054,8 +1054,8 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 			return nil, err
 		}
 
-		if len(an.stack) > 0 && nxt.Kind == (an.stack[len(an.stack)-1].closer) {
-			stackPop(&an.stack)
+		if len(par.stack) > 0 && nxt.Kind == (par.stack[len(par.stack)-1].closer) {
+			stackPop(&par.stack)
 		} else if !(nxt.Kind == SEMICOLON || nxt.Kind == NEWLINE) {
 			break
 		}
@@ -1064,7 +1064,7 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 	}
 
 	var ast *AstNode
-	path, ast, err = an.parseTok(path, nxt)
+	path, ast, err = par.parseTok(path, nxt)
 	*pathaddr = path
 
 	if err != nil {
@@ -1078,11 +1078,11 @@ func (an *Analyser) parseOne() (*AstNode, error) {
 	return ast, nil
 }
 
-func (an *Analyser) Parse() []*AstNode {
+func (par *Parser) Parse() []*AstNode {
 	nodes := []*AstNode{}
 
 	for {
-		nxt, err := an.parseOne()
+		nxt, err := par.parseOne()
 
 		if err != nil {
 			if err == io.EOF {
@@ -1097,12 +1097,12 @@ func (an *Analyser) Parse() []*AstNode {
 		}
 	}
 
-	if length := len(an.stack); length > 0 {
+	if length := len(par.stack); length > 0 {
 		var sbuilder strings.Builder
 
 		comma := true
 		for i := length; i >= 0; i-- {
-			v := an.stack[i]
+			v := par.stack[i]
 
 			if comma {
 				sbuilder.WriteRune(',')
