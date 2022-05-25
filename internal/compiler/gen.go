@@ -9,7 +9,10 @@ import (
 
 var notImplemented error
 
-var funcBodyKinds []AstKind
+var (
+	funcBodyKinds []AstKind = nil
+	modBodyKinds  []AstKind = nil
+)
 
 // returns first value (token)
 // if more than one exists, panics
@@ -53,6 +56,7 @@ func allowedKind(kind AstKind, allowed ...AstKind) bool {
 
 type Generator struct {
 	scopes  []*Scope // stack of scopes
+	stack   []types.Container
 	modules map[string][]*types.Module
 }
 
@@ -89,10 +93,44 @@ func (gen *Generator) pushScope(kind ScopeKind) *Scope {
 
 func (gen *Generator) popScope() *Scope {
 	idx := len(gen.scopes) - 1
+
+	if idx < 0 {
+		return nil
+	}
+
 	sc := gen.scopes[idx]
 	gen.scopes = gen.scopes[:idx]
 
 	return sc
+}
+
+func (gen *Generator) push(con types.Container) types.Container {
+	gen.stack = append(gen.stack, con)
+
+	return con
+}
+
+func (gen *Generator) addStmt(stmt types.StmtIface) error {
+	if len(gen.stack) < 1 {
+		return fmt.Errorf("empty stack")
+	}
+
+	gen.stack[len(gen.stack)-1].Add(stmt)
+
+	return nil
+}
+
+func (gen *Generator) pop() types.Container {
+	idx := len(gen.stack) - 1
+
+	if idx < 0 {
+		return nil
+	}
+
+	con := gen.stack[idx]
+	gen.stack = gen.stack[:idx]
+
+	return con
 }
 
 func (gen *Generator) findSym(name string) (types.Symbol, bool) {
@@ -127,10 +165,23 @@ func (gen *Generator) addModule(ast *AstNode) error {
 
 	name := string(value.Lexeme)
 
-	// TODO: This is not done
 	mod := &types.Module{
 		Name: name,
-		Body: []types.StmtIface{},
+		Body: nil,
+	}
+
+	gen.pushScope(MODULE_SCOPE)
+	gen.push(mod)
+
+	gen.genMany(ast.Children, modBodyKinds)
+
+	gen.pop()
+	gen.popScope()
+
+	csc := gen.curScope()
+
+	if csc != nil {
+		csc.set(name, mod)
 	}
 
 	gen.modules[name] = append(gen.modules[name], mod)
@@ -264,7 +315,12 @@ func (gen *Generator) addFunction(ast *AstNode) error {
 		return err
 	}
 
+	gen.addStmt(fun)
+
+	// Process function body
 	gen.pushScope(FUNCTION_SCOPE)
+	gen.push(fun)
+
 	csc := gen.curScope()
 
 	// make parameters available inside function scope
@@ -278,6 +334,8 @@ func (gen *Generator) addFunction(ast *AstNode) error {
 	}
 
 	gen.genMany(ast.Children[idx:], funcBodyKinds)
+
+	gen.pop()
 	gen.popScope()
 
 	return nil

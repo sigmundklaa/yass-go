@@ -20,6 +20,10 @@ type PartialImport struct {
 	Alias  string
 }
 
+func (mod *Module) Add(stmt StmtIface) {
+	mod.Body = append(mod.Body, stmt)
+}
+
 func (imp *Import) Resolve(path string) *Module {
 	return nil
 }
