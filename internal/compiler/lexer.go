@@ -76,7 +76,7 @@ func lexKindsJoin(kinds ...LexKind) string {
 	var builder strings.Builder
 
 	if len(kinds) > 0 {
-		fmt.Fprint(&builder, kinds[0].String())
+		fmt.Fprintf(&builder, "%s,", kinds[0].String())
 	}
 
 	for _, kind := range kinds[1:] {

@@ -316,19 +316,35 @@ func (path *parsePath) errfUnexpected(tok *Token, got, expected string) error {
 	return path.errfExpect(tok, "unexpected %s (expected %s)", got, expected)
 }
 
-func selectErrorPath(paths []*parsePath) *parsePath {
+func joinErrors(errs []error) error {
+	if length := len(errs); length > 0 {
+		var builder strings.Builder
+
+		builder.WriteString("error union:\n")
+
+		for _, e := range errs {
+			fmt.Fprintf(&builder, "\t%s\n", e)
+		}
+
+		return errors.New(builder.String())
+	}
+
+	return nil
+}
+
+func makePathsErrors(paths []*parsePath) []error {
+	errs := []error{}
+
 	if len(paths) < 1 {
-		return nil
+		return errs
 	}
 
 	p := paths[0]
-	for _, v := range paths {
-		if v.offset > p.offset {
-			p = v
-		}
+	for range paths {
+		errs = append(errs, p.errors...)
 	}
 
-	return p
+	return errs
 }
 
 func (path *parsePath) makeError() error {
@@ -336,7 +352,7 @@ func (path *parsePath) makeError() error {
 		var builder strings.Builder
 
 		for _, e := range path.errors {
-			fmt.Println(e)
+			fmt.Fprintf(&builder, "%s\n", e.Error())
 		}
 
 		return errors.New(builder.String())
@@ -742,12 +758,13 @@ func (path *parsePath) parseAtom(tok *Token) *AstNode {
 		}
 	}
 
-	errpath := selectErrorPath(paths)
+	errs := makePathsErrors(paths)
 
-	if errpath != nil {
-		if err := errpath.makeError(); err != nil {
+	if len(errs) > 0 {
+		if err := joinErrors(errs); err != nil {
 			// TODO: Fix this, should panic unexpected (?)
-			//panic(err)
+			//fmt.Printf(err.string())
+			panic(err)
 		}
 	}
 
@@ -1032,11 +1049,11 @@ func (par *Parser) parseTok(path *parsePath, tok *Token) (*parsePath, *AstNode, 
 		}
 	}
 
-	errpath := selectErrorPath(paths)
+	errs := makePathsErrors(paths)
 	err := path.errf(tok, "unable to parse")
 
-	if errpath != nil {
-		path = errpath
+	if len(errs) > 0 {
+		err = joinErrors(errs)
 	}
 
 	return path, nil, err
@@ -1089,6 +1106,7 @@ func (par *Parser) Parse() []*AstNode {
 				break
 			}
 
+			//fmt.Println(err.Error())
 			panic(err)
 		}
 
